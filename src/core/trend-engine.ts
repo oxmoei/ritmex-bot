@@ -16,16 +16,15 @@ import {
 } from "../utils/strategy";
 import {
   marketClose,
-  OrderLockMap,
-  OrderPendingMap,
-  OrderTimerMap,
   placeMarketOrder,
   placeStopLossOrder,
   placeTrailingStopOrder,
   unlockOperating,
 } from "./order-coordinator";
+import type { OrderLockMap, OrderPendingMap, OrderTimerMap } from "./order-coordinator";
 import { toPrice1Decimal } from "../utils/math";
 import { createTradeLog, type TradeLogEntry } from "../state/trade-log";
+import { loadState, saveState } from "../utils/persistence";
 
 export interface TrendEngineSnapshot {
   ready: boolean;
@@ -75,12 +74,18 @@ export class TrendEngine {
   private totalProfit = 0;
   private totalTrades = 0;
   private lastOpenPlan: OpenOrderPlan = { side: null, price: null };
+  private savedStateApplied = false;
+  private readonly stateFile: string;
+  private lastPersistedAt = 0;
+  private savedOpenOrders: AsterOrder[] = [];
 
   private readonly listeners = new Map<TrendEngineEvent, Set<TrendEngineListener>>();
 
   constructor(private readonly config: TradingConfig, private readonly exchange: ExchangeAdapter) {
     this.tradeLog = createTradeLog(this.config.maxLogEntries);
+    this.stateFile = `trend-${this.config.symbol}.json`;
     this.bootstrap();
+    void this.restoreState();
   }
 
   start(): void {
@@ -124,8 +129,9 @@ export class TrendEngine {
     this.exchange.watchOrders((orders) => {
       this.synchronizeLocks(orders);
       this.openOrders = Array.isArray(orders)
-        ? orders.filter((order) => order.type !== "MARKET")
+        ? orders.filter((order) => order.type !== "MARKET" && order.symbol === this.config.symbol)
         : [];
+      this.reconcileSavedOpenOrders();
       this.emitUpdate();
     });
     this.exchange.watchDepth(this.config.symbol, (depth) => {
@@ -392,8 +398,10 @@ export class TrendEngine {
   private emitUpdate(): void {
     const snapshot = this.buildSnapshot();
     const handlers = this.listeners.get("update");
-    if (!handlers) return;
-    handlers.forEach((handler) => handler(snapshot));
+    if (handlers) {
+      handlers.forEach((handler) => handler(snapshot));
+    }
+    void this.persistSnapshot(snapshot);
   }
 
   private buildSnapshot(): TrendEngineSnapshot {
@@ -430,5 +438,51 @@ export class TrendEngine {
       lastUpdated: Date.now(),
       lastOpenSignal: this.lastOpenPlan,
     };
+  }
+
+  private async restoreState(): Promise<void> {
+    if (this.savedStateApplied) return;
+    this.savedStateApplied = true;
+    const state = await loadState<{
+      totalProfit?: number;
+      totalTrades?: number;
+      lastOpenPlan?: OpenOrderPlan;
+      tradeLog?: TradeLogEntry[];
+      openOrders?: AsterOrder[];
+    }>(this.stateFile);
+    if (!state) return;
+    if (typeof state.totalProfit === "number") this.totalProfit = state.totalProfit;
+    if (typeof state.totalTrades === "number") this.totalTrades = state.totalTrades;
+    if (state.lastOpenPlan) this.lastOpenPlan = state.lastOpenPlan;
+    if (Array.isArray(state.tradeLog)) this.tradeLog.replace(state.tradeLog);
+    if (Array.isArray(state.openOrders)) this.savedOpenOrders = state.openOrders;
+  }
+
+  private reconcileSavedOpenOrders(): void {
+    if (!this.savedOpenOrders.length) return;
+    const currentIds = new Set(this.openOrders.map((order) => order.orderId));
+    const missing = this.savedOpenOrders.filter((order) => !currentIds.has(order.orderId));
+    if (missing.length) {
+      this.tradeLog.push(
+        "order",
+        `检测到 ${missing.length} 个历史挂单与当前状态不符，将按策略逻辑重新挂单`
+      );
+    }
+    this.savedOpenOrders = [];
+  }
+
+  private async persistSnapshot(snapshot: TrendEngineSnapshot): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastPersistedAt < 1000) return;
+    this.lastPersistedAt = now;
+    await saveState(this.stateFile, {
+      totalProfit: this.totalProfit,
+      totalTrades: this.totalTrades,
+      lastOpenPlan: this.lastOpenPlan,
+      tradeLog: snapshot.tradeLog,
+      openOrders: snapshot.openOrders.filter((order) => order.symbol === this.config.symbol),
+      position: snapshot.position,
+      timestamp: snapshot.lastUpdated,
+    });
   }
 }

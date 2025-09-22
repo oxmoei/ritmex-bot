@@ -7,6 +7,7 @@ import type {
   AsterOrder,
   AsterTicker,
   CreateOrderParams,
+  PositionSide,
 } from "../types";
 
 const REST_BASE = "https://fapi.asterdex.com";
@@ -93,18 +94,18 @@ function fromRestKline(entry: any[], interval: string, symbol: string): AsterKli
     symbol,
     interval,
     openTime: entry[0],
-    open: entry[1],
-    high: entry[2],
-    low: entry[3],
-    close: entry[4],
-    volume: entry[5],
+    open: String(entry[1]),
+    high: String(entry[2]),
+    low: String(entry[3]),
+    close: String(entry[4]),
+    volume: String(entry[5]),
     closeTime: entry[6],
-    quoteAssetVolume: entry[7],
-    numberOfTrades: entry[8],
-    takerBuyBaseAssetVolume: entry[9],
-    takerBuyQuoteAssetVolume: entry[10],
+    quoteAssetVolume: String(entry[7]),
+    numberOfTrades: Number(entry[8] ?? 0),
+    takerBuyBaseAssetVolume: String(entry[9] ?? "0"),
+    takerBuyQuoteAssetVolume: String(entry[10] ?? "0"),
     isClosed: Boolean(entry[11]),
-  } as AsterKline;
+  };
 }
 
 function toOrderFromRest(raw: any): AsterOrder {
@@ -243,13 +244,22 @@ export class AsterRestClient {
   async getKlines(symbol: string, interval: string, limit = DEFAULT_KLINE_LIMIT): Promise<AsterKline[]> {
     const upper = symbol.toUpperCase();
     const url = `${REST_BASE}/fapi/v1/continuousKlines?pair=${upper}&contractType=PERPETUAL&interval=${encodeURIComponent(interval)}&limit=${limit}`;
-    const response = await fetch(url);
+    let response: Response;
+    try {
+      response = await fetch(url);
+    } catch (error) {
+      throw new Error(`[AsterRestClient] 获取K线失败 ${String(error)}`);
+    }
+    const text = await response.text();
     if (!response.ok) {
-      const text = await response.text();
       throw new Error(`HTTP ${response.status} ${text}`);
     }
-    const payload = (await response.json()) as any[];
-    return payload.map((entry) => fromRestKline(entry, interval, upper));
+    try {
+      const payload = JSON.parse(text) as any[];
+      return payload.map((entry) => fromRestKline(entry, interval, upper));
+    } catch (error) {
+      throw new Error(`[AsterRestClient] 无法解析K线响应: ${text.slice(0, 200)}`);
+    }
   }
 
   async getListenKey(): Promise<string> {
@@ -278,16 +288,26 @@ export class AsterRestClient {
         "Content-Type": "application/x-www-form-urlencoded",
       },
     };
-    const response = await fetch(url, init);
+    let response: Response;
+    try {
+      response = await fetch(url, init);
+    } catch (error) {
+      throw new Error(`[AsterRestClient] 请求失败 ${String(error)}`);
+    }
+    const text = await response.text();
     if (!response.ok) {
-      const text = await response.text();
       throw new Error(`HTTP ${response.status} ${text}`);
     }
-    return (await response.json()) as T;
+    try {
+      return JSON.parse(text) as T;
+    } catch (error) {
+      throw new Error(`[AsterRestClient] 无法解析响应: ${text.slice(0, 200)}`);
+    }
   }
 
   private serialize(params: Record<string, unknown>): string {
     return Object.keys(params)
+      .filter((key) => params[key] !== undefined && params[key] !== null)
       .sort()
       .map((key) => `${key}=${encodeURIComponent(String(params[key]))}`)
       .join("&");
@@ -374,7 +394,17 @@ export class AsterPublicStreams {
       }
     };
     this.ws.onmessage = (event) => {
-      const payload = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+      let payload: any;
+      if (typeof event.data === "string") {
+        try {
+          payload = JSON.parse(event.data);
+        } catch (error) {
+          console.error("[AsterPublicStreams] 无法解析消息", error, event.data);
+          return;
+        }
+      } else {
+        payload = event.data;
+      }
       if (!payload) return;
       if (payload.result !== undefined) return; // subscription ack
       const data = payload.data ?? payload;
@@ -456,6 +486,7 @@ export class AsterUserStream {
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private readonly accountEvent = new SimpleEvent<{ eventTime: number; payload: AccountUpdatePayload }>();
   private readonly orderEvent = new SimpleEvent<{ eventTime: number; payload: OrderUpdatePayload }>();
+  private readonly connectEvent = new SimpleEvent<void>();
   private isRunning = false;
 
   constructor(rest: AsterRestClient) {
@@ -468,6 +499,10 @@ export class AsterUserStream {
 
   onOrder(listener: (payload: { eventTime: number; payload: OrderUpdatePayload }) => void): void {
     this.orderEvent.add(listener);
+  }
+
+  onConnect(listener: () => void): void {
+    this.connectEvent.add(listener);
   }
 
   async start(): Promise<void> {
@@ -517,10 +552,20 @@ export class AsterUserStream {
     const url = `${WS_LISTEN_KEY_URL}${this.listenKey}`;
     this.ws = new WebSocket(url);
     this.ws.onopen = () => {
-      // no-op
+      this.connectEvent.emit();
     };
     this.ws.onmessage = (event) => {
-      const payload = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+      let payload: any;
+      if (typeof event.data === "string") {
+        try {
+          payload = JSON.parse(event.data);
+        } catch (error) {
+          console.error("[AsterUserStream] 无法解析消息", error, event.data);
+          return;
+        }
+      } else {
+        payload = event.data;
+      }
       if (!payload) return;
       if (payload === "ping") {
         this.ws?.send("pong");
@@ -572,30 +617,20 @@ function updateAccountSnapshot(snapshot: AsterAccountSnapshot | null, event: { e
   const balances = event.payload.B ?? [];
   for (const balance of balances) {
     const asset = balance.a;
-    let existing = next.assets.find((item) => item.asset === asset);
-    if (!existing) {
-      existing = {
+    let assetEntry = next.assets.find((item) => item.asset === asset);
+    if (!assetEntry) {
+      assetEntry = {
         asset,
         walletBalance: "0",
-        unrealizedProfit: "0",
-        marginBalance: "0",
-        maintMargin: "0",
-        initialMargin: "0",
-        positionInitialMargin: "0",
-        openOrderInitialMargin: "0",
-        crossWalletBalance: "0",
-        crossUnPnl: "0",
         availableBalance: "0",
-        maxWithdrawAmount: "0",
-        marginAvailable: true,
         updateTime: event.eventTime,
-      } as any;
-      next.assets.push(existing);
+      };
+      next.assets.push(assetEntry);
     }
-    if (balance.wb !== undefined) existing.walletBalance = balance.wb;
-    if (balance.cw !== undefined) existing.crossWalletBalance = balance.cw;
-    if (balance.bc !== undefined) existing.availableBalance = balance.bc;
-    existing.updateTime = event.eventTime;
+    if (balance.wb !== undefined) assetEntry.walletBalance = balance.wb;
+    if (balance.cw !== undefined) assetEntry.crossWalletBalance = balance.cw;
+    if (balance.bc !== undefined) assetEntry.availableBalance = balance.bc;
+    assetEntry.updateTime = event.eventTime;
   }
 
   const positions = event.payload.P ?? [];
@@ -604,29 +639,22 @@ function updateAccountSnapshot(snapshot: AsterAccountSnapshot | null, event: { e
 
   for (const position of positions) {
     const symbol = position.s;
-    let existing = next.positions.find((item) => item.symbol === symbol && item.positionSide === position.ps);
-    if (!existing) {
-      existing = {
+    let positionEntry = next.positions.find((item) => item.symbol === symbol && item.positionSide === (position.ps as PositionSide));
+    if (!positionEntry) {
+      positionEntry = {
         symbol,
         positionAmt: "0",
         entryPrice: "0",
         unrealizedProfit: "0",
-        positionSide: position.ps,
+        positionSide: position.ps as PositionSide,
         updateTime: event.eventTime,
-        initialMargin: "0",
-        maintMargin: "0",
-        positionInitialMargin: "0",
-        openOrderInitialMargin: "0",
-        leverage: "",
-        isolated: position.mt === "isolated",
-        maxNotional: "0",
-      } as any;
-      next.positions.push(existing);
+      };
+      next.positions.push(positionEntry);
     }
-    existing.positionAmt = position.pa ?? existing.positionAmt;
-    existing.entryPrice = position.ep ?? existing.entryPrice;
-    existing.unrealizedProfit = position.up ?? existing.unrealizedProfit;
-    existing.updateTime = event.eventTime;
+    positionEntry.positionAmt = position.pa ?? positionEntry.positionAmt;
+    positionEntry.entryPrice = position.ep ?? positionEntry.entryPrice;
+    positionEntry.unrealizedProfit = position.up ?? positionEntry.unrealizedProfit;
+    positionEntry.updateTime = event.eventTime;
   }
   return next;
 }
@@ -675,20 +703,18 @@ export class AsterGateway {
       mergeOrderSnapshot(this.openOrders, order);
       this.ordersEvent.emit(Array.from(this.openOrders.values()));
     });
+    this.userStream.onConnect(() => {
+      void this.refreshSnapshots();
+    });
   }
 
   async ensureInitialized(symbol: string): Promise<void> {
     if (this.initialized) return;
     if (this.initializing) return this.initializing;
     this.initializing = (async () => {
-      this.accountSnapshot = await this.rest.getAccount();
-      const orders = await this.rest.getOpenOrders();
-      this.openOrders.clear();
-      orders.forEach((order) => mergeOrderSnapshot(this.openOrders, order));
+      await this.refreshSnapshots();
       this.initialized = true;
       await this.userStream.start();
-      this.accountEvent.emit(this.accountSnapshot!);
-      this.ordersEvent.emit(Array.from(this.openOrders.values()));
     })().catch((error) => {
       this.initializing = null;
       throw error;
@@ -809,6 +835,24 @@ export class AsterGateway {
       }
     }, KLINE_REFRESH_INTERVAL_MS);
     this.klineRefreshTimers.set(key, timer);
+  }
+
+  private async refreshSnapshots(): Promise<void> {
+    try {
+      const account = await this.rest.getAccount();
+      this.accountSnapshot = account;
+      this.accountEvent.emit(account);
+    } catch (error) {
+      console.error("[AsterGateway] 刷新账户信息失败", error);
+    }
+    try {
+      const orders = await this.rest.getOpenOrders();
+      this.openOrders.clear();
+      orders.forEach((order) => mergeOrderSnapshot(this.openOrders, order));
+      this.ordersEvent.emit(Array.from(this.openOrders.values()));
+    } catch (error) {
+      console.error("[AsterGateway] 刷新挂单失败", error);
+    }
   }
 
   getAccountSnapshot(): AsterAccountSnapshot | null {

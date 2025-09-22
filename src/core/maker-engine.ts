@@ -8,15 +8,14 @@ import type {
 } from "../exchanges/types";
 import { toPrice1Decimal } from "../utils/math";
 import { createTradeLog, type TradeLogEntry } from "../state/trade-log";
+import { loadState, saveState } from "../utils/persistence";
 import { getPosition, type PositionSnapshot } from "../utils/strategy";
 import {
   marketClose,
-  OrderLockMap,
-  OrderPendingMap,
-  OrderTimerMap,
   placeOrder,
   unlockOperating,
 } from "./order-coordinator";
+import type { OrderLockMap, OrderPendingMap, OrderTimerMap } from "./order-coordinator";
 
 interface DesiredOrder {
   side: "BUY" | "SELL";
@@ -57,6 +56,10 @@ export class MakerEngine {
 
   private readonly tradeLog: ReturnType<typeof createTradeLog>;
   private readonly listeners = new Map<MakerEvent, Set<MakerListener>>();
+  private readonly stateFile: string;
+  private savedStateApplied = false;
+  private lastPersistedAt = 0;
+  private savedOpenOrders: AsterOrder[] = [];
 
   private timer: ReturnType<typeof setInterval> | null = null;
   private processing = false;
@@ -65,7 +68,9 @@ export class MakerEngine {
 
   constructor(private readonly config: MakerConfig, private readonly exchange: ExchangeAdapter) {
     this.tradeLog = createTradeLog(this.config.maxLogEntries);
+    this.stateFile = `maker-${this.config.symbol}.json`;
     this.bootstrap();
+    void this.restoreState();
   }
 
   start(): void {
@@ -113,7 +118,10 @@ export class MakerEngine {
 
     this.exchange.watchOrders((orders) => {
       this.syncLocksWithOrders(orders);
-      this.openOrders = Array.isArray(orders) ? orders.filter((order) => order.type !== "MARKET") : [];
+      this.openOrders = Array.isArray(orders)
+        ? orders.filter((order) => order.type !== "MARKET" && order.symbol === this.config.symbol)
+        : [];
+      this.reconcileSavedOpenOrders();
       this.emitUpdate();
     });
 
@@ -230,6 +238,7 @@ export class MakerEngine {
 
     for (const index of unmatched) {
       const target = targets[index];
+      if (!target) continue;
       if (target.amount < EPS) continue;
       try {
         await placeOrder(
@@ -297,8 +306,10 @@ export class MakerEngine {
   private emitUpdate(): void {
     const snapshot = this.buildSnapshot();
     const handlers = this.listeners.get("update");
-    if (!handlers) return;
-    handlers.forEach((handler) => handler(snapshot));
+    if (handlers) {
+      handlers.forEach((handler) => handler(snapshot));
+    }
+    void this.persistSnapshot(snapshot);
   }
 
   private buildSnapshot(): MakerEngineSnapshot {
@@ -329,5 +340,43 @@ export class MakerEngine {
       tradeLog: this.tradeLog.all(),
       lastUpdated: Date.now(),
     };
+  }
+
+  private async restoreState(): Promise<void> {
+    if (this.savedStateApplied) return;
+    this.savedStateApplied = true;
+    const state = await loadState<{
+      tradeLog?: TradeLogEntry[];
+      accountUnrealized?: number;
+      openOrders?: AsterOrder[];
+    }>(this.stateFile);
+    if (!state) return;
+    if (Array.isArray(state.tradeLog)) this.tradeLog.replace(state.tradeLog);
+    if (typeof state.accountUnrealized === "number") this.accountUnrealized = state.accountUnrealized;
+    if (Array.isArray(state.openOrders)) this.savedOpenOrders = state.openOrders;
+  }
+
+  private reconcileSavedOpenOrders(): void {
+    if (!this.savedOpenOrders.length) return;
+    const currentIds = new Set(this.openOrders.map((order) => order.orderId));
+    const missing = this.savedOpenOrders.filter((order) => !currentIds.has(order.orderId));
+    if (missing.length) {
+      this.tradeLog.push("order", `检测到 ${missing.length} 个历史挂单与当前状态不一致，将重新同步`);
+    }
+    this.savedOpenOrders = [];
+  }
+
+  private async persistSnapshot(snapshot?: MakerEngineSnapshot): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastPersistedAt < 1000) return;
+    this.lastPersistedAt = now;
+    const current = snapshot ?? this.buildSnapshot();
+    await saveState(this.stateFile, {
+      tradeLog: current.tradeLog,
+      accountUnrealized: current.accountUnrealized,
+      openOrders: current.openOrders.filter((order) => order.symbol === this.config.symbol),
+      position: current.position,
+      timestamp: current.lastUpdated,
+    });
   }
 }

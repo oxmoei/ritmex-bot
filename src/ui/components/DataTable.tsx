@@ -45,7 +45,10 @@ export function DataTable<Row extends Record<string, unknown>>({ columns, rows }
     <Box flexDirection="column">
       <Text>
         {columns
-          .map((col, index) => pad(col.header, widths[index], col.align ?? "left"))
+          .map((col, index) => {
+            const width = widths[index] ?? col.header.length;
+            return pad(col.header, width, col.align ?? "left");
+          })
           .join("  ")}
       </Text>
       {rows.map((row, rowIndex) => (
@@ -54,7 +57,8 @@ export function DataTable<Row extends Record<string, unknown>>({ columns, rows }
             .map((col, index) => {
               const align = col.align ?? "left";
               const cell = formatCell(row[col.key]);
-              return pad(cell, widths[index], align);
+              const width = widths[index] ?? Math.max(col.header.length, cell.length);
+              return pad(cell, width, align);
             })
             .join("  ")}
         </Text>

@@ -30,6 +30,13 @@ export interface AsterAccountPosition {
   unrealizedProfit: string;
   positionSide: PositionSide;
   updateTime: number;
+  initialMargin?: string;
+  maintMargin?: string;
+  positionInitialMargin?: string;
+  openOrderInitialMargin?: string;
+  leverage?: string;
+  isolated?: boolean;
+  maxNotional?: string;
 }
 
 export interface AsterAccountAsset {
@@ -37,6 +44,16 @@ export interface AsterAccountAsset {
   walletBalance: string;
   availableBalance: string;
   updateTime: number;
+  unrealizedProfit?: string;
+  marginBalance?: string;
+  maintMargin?: string;
+  initialMargin?: string;
+  positionInitialMargin?: string;
+  openOrderInitialMargin?: string;
+  crossWalletBalance?: string;
+  crossUnPnl?: string;
+  maxWithdrawAmount?: string;
+  marginAvailable?: boolean;
 }
 
 export interface AsterAccountSnapshot {
@@ -46,6 +63,15 @@ export interface AsterAccountSnapshot {
   updateTime: number;
   totalWalletBalance: string;
   totalUnrealizedProfit: string;
+  totalMarginBalance?: string;
+  totalInitialMargin?: string;
+  totalMaintMargin?: string;
+  totalPositionInitialMargin?: string;
+  totalOpenOrderInitialMargin?: string;
+  totalCrossWalletBalance?: string;
+  totalCrossUnPnl?: string;
+  availableBalance?: string;
+  maxWithdrawAmount?: string;
   positions: AsterAccountPosition[];
   assets: AsterAccountAsset[];
 }
@@ -60,6 +86,9 @@ export interface AsterDepth {
   bids: AsterDepthLevel[];
   asks: AsterDepthLevel[];
   eventTime?: number;
+  eventType?: string;
+  tradeTime?: number;
+  symbol?: string;
 }
 
 export interface AsterTicker {
@@ -71,6 +100,16 @@ export interface AsterTicker {
   volume: string;
   quoteVolume: string;
   eventTime?: number;
+  eventType?: string;
+  priceChange?: string;
+  priceChangePercent?: string;
+  weightedAvgPrice?: string;
+  lastQty?: string;
+  openTime?: number;
+  closeTime?: number;
+  firstId?: number;
+  lastId?: number;
+  count?: number;
 }
 
 export interface AsterKline {
@@ -110,4 +149,12 @@ export interface AsterOrder {
   reduceOnly: boolean;
   closePosition: boolean;
   workingType?: string;
+  avgPrice?: string;
+  cumQuote?: string;
+  origType?: string;
+  positionSide?: PositionSide;
+  timeInForce?: TimeInForce;
+  activatePrice?: string;
+  priceRate?: string;
+  priceProtect?: boolean;
 }

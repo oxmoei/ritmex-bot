@@ -1,4 +1,4 @@
-import { AsterAccountSnapshot, AsterKline } from "../exchanges/types";
+import type { AsterAccountSnapshot, AsterKline } from "../exchanges/types";
 
 export interface PositionSnapshot {
   positionAmt: number;
