@@ -1,0 +1,20 @@
+{
+  "name": "ritmex-bot",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest",
+    "vitest": "^3.2.4"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "ccxt": "^4.5.5",
+    "dotenv": "^17.2.2",
+    "ink": "^6.3.1",
+    "react": "^19.1.1",
+    "ws": "^8.18.3"
+  }
+}
