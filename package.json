@@ -3,6 +3,12 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "dev": "bun run index.ts",
+    "start": "bun run index.ts",
+    "test": "bun x vitest run",
+    "test:watch": "bun x vitest"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "vitest": "^3.2.4"
