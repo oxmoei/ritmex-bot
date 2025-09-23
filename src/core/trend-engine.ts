@@ -15,7 +15,7 @@ import {
   type PositionSnapshot,
 } from "../utils/strategy";
 import { computePositionPnl } from "../utils/pnl";
-import { getTopPrices, getMidOrLast } from "../utils/price";
+import { getMidOrLast } from "../utils/price";
 import {
   marketClose,
   placeMarketOrder,
