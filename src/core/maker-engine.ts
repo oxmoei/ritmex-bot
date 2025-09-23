@@ -339,7 +339,7 @@ export class MakerEngine {
     const snapshotLoss = Boolean(
       unrealized != null &&
         unrealized < -this.config.lossLimit &&
-        Math.sign(unrealized) === Math.sign(pnl)
+        pnl <= 0
     );
 
     if (derivedLoss || snapshotLoss) {
