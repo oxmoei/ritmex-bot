@@ -68,6 +68,7 @@ export class MakerEngine {
   private initializedPosition = false;
   private initialOrderSnapshotReady = false;
   private initialOrderResetDone = false;
+  private entryPricePendingLogged = false;
 
   constructor(private readonly config: MakerConfig, private readonly exchange: ExchangeAdapter) {
     this.tradeLog = createTradeLog(this.config.maxLogEntries);
@@ -195,6 +196,7 @@ export class MakerEngine {
       const desired: DesiredOrder[] = [];
 
       if (absPosition < EPS) {
+        this.entryPricePendingLogged = false;
         desired.push({ side: "BUY", price: bidPrice, amount: this.config.tradeAmount, reduceOnly: false });
         desired.push({ side: "SELL", price: askPrice, amount: this.config.tradeAmount, reduceOnly: false });
       } else {
@@ -317,11 +319,30 @@ export class MakerEngine {
     const absPosition = Math.abs(position.positionAmt);
     if (absPosition < EPS) return;
 
+    const hasEntryPrice = Number.isFinite(position.entryPrice) && Math.abs(position.entryPrice) > 1e-8;
+    if (!hasEntryPrice) {
+      if (!this.entryPricePendingLogged) {
+        this.tradeLog.push("info", "做市持仓均价未同步，等待账户快照刷新后再执行止损判断");
+        this.entryPricePendingLogged = true;
+      }
+      return;
+    }
+    this.entryPricePendingLogged = false;
+
     const pnl = position.positionAmt > 0
       ? (bidPrice - position.entryPrice) * absPosition
       : (position.entryPrice - askPrice) * absPosition;
+    const unrealized = Number.isFinite(position.unrealizedProfit)
+      ? position.unrealizedProfit
+      : null;
+    const derivedLoss = pnl < -this.config.lossLimit;
+    const snapshotLoss = Boolean(
+      unrealized != null &&
+        unrealized < -this.config.lossLimit &&
+        Math.sign(unrealized) === Math.sign(pnl)
+    );
 
-    if (pnl < -this.config.lossLimit || position.unrealizedProfit < -this.config.lossLimit) {
+    if (derivedLoss || snapshotLoss) {
       this.tradeLog.push(
         "stop",
         `触发止损，方向=${position.positionAmt > 0 ? "多" : "空"} 当前亏损=${pnl.toFixed(4)} USDT`
