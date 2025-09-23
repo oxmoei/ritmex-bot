@@ -1,5 +1,13 @@
-# 快速上手（小白友好版）
-1. 安装 [Bun](https://bun.com) ≥ 1.2，并执行 `bun install` 下载安装依赖。
+# ritmex-bot
+
+一个基于 Bun 的 Aster 永续合约终端机器人，内置趋势跟随（SMA30）与做市策略，使用 websocket 实时行情，命令行界面由 Ink 驱动，可在断线后自动恢复运行。
+
+## 快速上手
+1. 安装 [Bun](https://bun.com) ≥ 1.2。常见安装方式：
+   ```bash
+   curl -fsSL https://bun.sh/install | bash    # macOS / Linux
+   ```
+   安装后重新打开终端，使 `bun` 命令生效，然后执行 `bun install` 下载安装依赖。
 2. 复制 `.env.example` 为 `.env` 并填入你的 Aster API Key/Secret，例如：
    ```bash
    cp .env.example .env
@@ -17,8 +25,6 @@
    ```
    在终端中按 ↑/↓ 选择 “趋势策略” 或 “做市策略”，回车启动。按 `Esc` 可返回选择菜单，`Ctrl+C` 退出。
 4. 仿真/测试环境建议先设置极小仓位；真实资金请确保 API 仅开启所需权限，并先在低金额下验证策略行为。
-
-# ritmex-bot
 
 A Bun-powered trading workstation for Aster perpetual contracts. The project ships two production strategies—an SMA30 trend follower and a dual-sided maker—that share a modular gateway, UI, and persistence layer. Everything runs in the terminal via Ink, with live websocket refresh and automatic recovery from restarts or network failures.
 
