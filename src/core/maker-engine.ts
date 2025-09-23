@@ -288,6 +288,7 @@ export class MakerEngine {
         } else {
           this.tradeLog.push("error", `撤销订单失败: ${String(error)}`);
           this.pendingCancelOrders.delete(order.orderId);
+          this.openOrders = this.openOrders.filter((existing) => existing.orderId !== order.orderId);
         }
       }
     }
@@ -386,6 +387,8 @@ export class MakerEngine {
         } else {
           this.tradeLog.push("error", `撤销订单失败: ${String(error)}`);
           this.pendingCancelOrders.delete(order.orderId);
+          // 与偏移做市保持一致：移除本地缓存中的异常订单，等待订单流推送重建
+          this.openOrders = this.openOrders.filter((existing) => existing.orderId !== order.orderId);
         }
       }
     }

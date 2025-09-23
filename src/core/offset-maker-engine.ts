@@ -374,6 +374,8 @@ export class OffsetMakerEngine {
         } else {
           this.tradeLog.push("error", `撤销订单失败: ${String(error)}`);
           this.pendingCancelOrders.delete(order.orderId);
+          // 避免同一轮内重复操作同一张已出错的本地挂单，直接从本地缓存移除，等待下一次订单推送重建
+          this.openOrders = this.openOrders.filter((existing) => existing.orderId !== order.orderId);
         }
       }
     }
@@ -472,6 +474,8 @@ export class OffsetMakerEngine {
         } else {
           this.tradeLog.push("error", `撤销订单失败: ${String(error)}`);
           this.pendingCancelOrders.delete(order.orderId);
+          // 与同步撤单路径保持一致，移除本地异常订单，等待订单流重建
+          this.openOrders = this.openOrders.filter((existing) => existing.orderId !== order.orderId);
         }
       }
     }

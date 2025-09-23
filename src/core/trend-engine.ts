@@ -252,10 +252,16 @@ export class TrendEngine {
       try {
         await this.exchange.cancelAllOrders({ symbol: this.config.symbol });
         this.cancelAllRequested = true;
+        // 清空本地挂单与撤单队列，避免在下一轮中基于过期快照继续操作
+        this.pendingCancelOrders.clear();
+        this.openOrders = [];
       } catch (err) {
         if (isUnknownOrderError(err)) {
           this.tradeLog.push("order", "撤单时部分订单已不存在，忽略");
           this.cancelAllRequested = true;
+          // 与成功撤单路径保持一致，立即清空本地缓存，等待订单流推送重建
+          this.pendingCancelOrders.clear();
+          this.openOrders = [];
         } else {
           this.tradeLog.push("error", `撤销挂单失败: ${String(err)}`);
           this.cancelAllRequested = false;
@@ -379,6 +385,11 @@ export class TrendEngine {
           } catch (err) {
             if (isUnknownOrderError(err)) {
               this.tradeLog.push("order", "止损前撤单发现订单已不存在");
+                // 清理本地缓存，避免重复对同一订单执行撤单
+                for (const id of orderIdList) {
+                  this.pendingCancelOrders.delete(id);
+                }
+                this.openOrders = this.openOrders.filter((o) => !orderIdList.includes(o.orderId));
             } else {
               throw err;
             }
@@ -446,6 +457,8 @@ export class TrendEngine {
     } catch (err) {
       if (isUnknownOrderError(err)) {
         this.tradeLog.push("order", "原止损单已不存在，跳过撤销");
+        // 订单已不存在，移除本地记录，防止后续重复匹配
+        this.openOrders = this.openOrders.filter((o) => o.orderId !== currentOrder.orderId);
       } else {
         this.tradeLog.push("error", `取消原止损单失败: ${String(err)}`);
       }
