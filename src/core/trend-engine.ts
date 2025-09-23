@@ -83,6 +83,7 @@ export class TrendEngine {
 
   private ordersSnapshotReady = false;
   private startupLogged = false;
+  private entryPricePendingLogged = false;
 
   private readonly listeners = new Map<TrendEngineEvent, Set<TrendEngineListener>>();
 
@@ -242,6 +243,7 @@ export class TrendEngine {
   }
 
   private async handleOpenPosition(currentPrice: number, currentSma: number): Promise<void> {
+    this.entryPricePendingLogged = false;
     if (this.lastPrice == null) {
       this.lastPrice = currentPrice;
       return;
@@ -291,11 +293,23 @@ export class TrendEngine {
     position: PositionSnapshot,
     price: number
   ): Promise<{ closed: boolean; pnl: number }> {
+    const hasEntryPrice = Number.isFinite(position.entryPrice) && Math.abs(position.entryPrice) > 1e-8;
+    if (!hasEntryPrice) {
+      if (!this.entryPricePendingLogged) {
+        this.tradeLog.push("info", "持仓均价尚未同步，等待交易所账户快照更新后再执行风控");
+        this.entryPricePendingLogged = true;
+      }
+      return { closed: false, pnl: position.unrealizedProfit };
+    }
+    this.entryPricePendingLogged = false;
     const direction = position.positionAmt > 0 ? "long" : "short";
     const pnl =
       (direction === "long"
         ? price - position.entryPrice
         : position.entryPrice - price) * Math.abs(position.positionAmt);
+    const unrealized = Number.isFinite(position.unrealizedProfit)
+      ? position.unrealizedProfit
+      : null;
     const stopSide = direction === "long" ? "SELL" : "BUY";
     const stopPrice = calcStopLossPrice(
       position.entryPrice,
@@ -348,7 +362,14 @@ export class TrendEngine {
       );
     }
 
-    if (pnl < -this.config.lossLimit || position.unrealizedProfit < -this.config.lossLimit) {
+    const derivedLoss = pnl < -this.config.lossLimit;
+    const snapshotLoss = Boolean(
+      unrealized != null &&
+        unrealized < -this.config.lossLimit &&
+        Math.sign(unrealized) === Math.sign(pnl)
+    );
+
+    if (derivedLoss || snapshotLoss) {
       try {
         if (this.openOrders.length > 0) {
           const orderIdList = this.openOrders.map((order) => order.orderId);
