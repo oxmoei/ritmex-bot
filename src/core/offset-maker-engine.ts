@@ -7,7 +7,7 @@ import type {
   AsterTicker,
 } from "../exchanges/types";
 import { toPrice1Decimal } from "../utils/math";
-import { createTradeLog, type TradeLogEntry } from "../state/trade-log";
+import { createTradeLog } from "../state/trade-log";
 import { isUnknownOrderError } from "../utils/errors";
 import { getPosition, type PositionSnapshot } from "../utils/strategy";
 import {
@@ -16,6 +16,7 @@ import {
   unlockOperating,
 } from "./order-coordinator";
 import type { OrderLockMap, OrderPendingMap, OrderTimerMap } from "./order-coordinator";
+import type { MakerEngineSnapshot } from "./maker-engine";
 
 interface DesiredOrder {
   side: "BUY" | "SELL";
@@ -24,28 +25,20 @@ interface DesiredOrder {
   reduceOnly: boolean;
 }
 
-export interface MakerEngineSnapshot {
-  ready: boolean;
-  symbol: string;
-  topBid: number | null;
-  topAsk: number | null;
-  spread: number | null;
-  position: PositionSnapshot;
-  pnl: number;
-  accountUnrealized: number;
-  sessionVolume: number;
-  openOrders: AsterOrder[];
-  desiredOrders: DesiredOrder[];
-  tradeLog: TradeLogEntry[];
-  lastUpdated: number | null;
+export interface OffsetMakerEngineSnapshot extends MakerEngineSnapshot {
+  buyDepthSum10: number;
+  sellDepthSum10: number;
+  depthImbalance: "balanced" | "buy_dominant" | "sell_dominant";
+  skipBuySide: boolean;
+  skipSellSide: boolean;
 }
 
 type MakerEvent = "update";
-type MakerListener = (snapshot: MakerEngineSnapshot) => void;
+type MakerListener = (snapshot: OffsetMakerEngineSnapshot) => void;
 
 const EPS = 1e-5;
 
-export class MakerEngine {
+export class OffsetMakerEngine {
   private accountSnapshot: AsterAccountSnapshot | null = null;
   private depthSnapshot: AsterDepth | null = null;
   private tickerSnapshot: AsterTicker | null = null;
@@ -69,6 +62,12 @@ export class MakerEngine {
   private initialOrderSnapshotReady = false;
   private initialOrderResetDone = false;
   private entryPricePendingLogged = false;
+
+  private lastBuyDepthSum10 = 0;
+  private lastSellDepthSum10 = 0;
+  private lastSkipBuy = false;
+  private lastSkipSell = false;
+  private lastImbalance: "balanced" | "buy_dominant" | "sell_dominant" = "balanced";
 
   constructor(private readonly config: MakerConfig, private readonly exchange: ExchangeAdapter) {
     this.tradeLog = createTradeLog(this.config.maxLogEntries);
@@ -104,7 +103,7 @@ export class MakerEngine {
     }
   }
 
-  getSnapshot(): MakerEngineSnapshot {
+  getSnapshot(): OffsetMakerEngineSnapshot {
     return this.buildSnapshot();
   }
 
@@ -145,7 +144,6 @@ export class MakerEngine {
       this.emitUpdate();
     });
 
-    // Maker strategy does not consume klines, but subscribe to keep parity with other modules
     this.exchange.watchKlines(this.config.symbol, "1m", () => {
       /* no-op */
     });
@@ -189,16 +187,33 @@ export class MakerEngine {
         return;
       }
 
+      const { buySum, sellSum, skipBuySide, skipSellSide, imbalance } = this.evaluateDepth(depth);
+      this.lastBuyDepthSum10 = buySum;
+      this.lastSellDepthSum10 = sellSum;
+      this.lastSkipBuy = skipBuySide;
+      this.lastSkipSell = skipSellSide;
+      this.lastImbalance = imbalance;
+
+      const position = getPosition(this.accountSnapshot, this.config.symbol);
+      const handledImbalance = await this.handleImbalanceExit(position, buySum, sellSum);
+      if (handledImbalance) {
+        this.emitUpdate();
+        return;
+      }
+
       const bidPrice = toPrice1Decimal(topBid! - this.config.bidOffset);
       const askPrice = toPrice1Decimal(topAsk! + this.config.askOffset);
-      const position = getPosition(this.accountSnapshot, this.config.symbol);
       const absPosition = Math.abs(position.positionAmt);
       const desired: DesiredOrder[] = [];
 
       if (absPosition < EPS) {
         this.entryPricePendingLogged = false;
-        desired.push({ side: "BUY", price: bidPrice, amount: this.config.tradeAmount, reduceOnly: false });
-        desired.push({ side: "SELL", price: askPrice, amount: this.config.tradeAmount, reduceOnly: false });
+        if (!skipBuySide) {
+          desired.push({ side: "BUY", price: bidPrice, amount: this.config.tradeAmount, reduceOnly: false });
+        }
+        if (!skipSellSide) {
+          desired.push({ side: "SELL", price: askPrice, amount: this.config.tradeAmount, reduceOnly: false });
+        }
       } else {
         const closeSide: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
         const closePrice = closeSide === "SELL" ? askPrice : bidPrice;
@@ -211,7 +226,7 @@ export class MakerEngine {
       await this.checkRisk(position, bidPrice, askPrice);
       this.emitUpdate();
     } catch (error) {
-      this.tradeLog.push("error", `做市循环异常: ${String(error)}`);
+      this.tradeLog.push("error", `偏移做市循环异常: ${String(error)}`);
       this.emitUpdate();
     } finally {
       this.processing = false;
@@ -245,6 +260,77 @@ export class MakerEngine {
       this.tradeLog.push("error", `启动撤单失败: ${String(error)}`);
       return false;
     }
+  }
+
+  private evaluateDepth(depth: AsterDepth): {
+    buySum: number;
+    sellSum: number;
+    skipBuySide: boolean;
+    skipSellSide: boolean;
+    imbalance: "balanced" | "buy_dominant" | "sell_dominant";
+  } {
+    const topBids = (depth.bids ?? []).slice(0, 10);
+    const topAsks = (depth.asks ?? []).slice(0, 10);
+    const buySum = topBids.reduce((total, [price, qty]) => {
+      const size = Number(qty);
+      return Number.isFinite(size) ? total + size : total;
+    }, 0);
+    const sellSum = topAsks.reduce((total, [price, qty]) => {
+      const size = Number(qty);
+      return Number.isFinite(size) ? total + size : total;
+    }, 0);
+
+    const skipSellSide = sellSum === 0 || sellSum * 3 < buySum;
+    const skipBuySide = buySum === 0 || buySum * 3 < sellSum;
+    let imbalance: "balanced" | "buy_dominant" | "sell_dominant" = "balanced";
+    if (buySum > sellSum * 3) {
+      imbalance = "buy_dominant";
+    } else if (sellSum > buySum * 3) {
+      imbalance = "sell_dominant";
+    }
+
+    return { buySum, sellSum, skipBuySide, skipSellSide, imbalance };
+  }
+
+  private async handleImbalanceExit(
+    position: PositionSnapshot,
+    buySum: number,
+    sellSum: number
+  ): Promise<boolean> {
+    const absPosition = Math.abs(position.positionAmt);
+    if (absPosition < EPS) return false;
+
+    const longExitRequired = position.positionAmt > 0 && (buySum === 0 || buySum * 5 < sellSum);
+    const shortExitRequired = position.positionAmt < 0 && (sellSum === 0 || sellSum * 5 < buySum);
+
+    if (!longExitRequired && !shortExitRequired) return false;
+
+    const side: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
+    this.tradeLog.push(
+      "stop",
+      `深度极端不平衡(${buySum.toFixed(4)} vs ${sellSum.toFixed(4)}), 市价平仓 ${side}`
+    );
+    try {
+      await this.flushOrders();
+      await marketClose(
+        this.exchange,
+        this.config.symbol,
+        this.openOrders,
+        this.locks,
+        this.timers,
+        this.pending,
+        side,
+        absPosition,
+        (type, detail) => this.tradeLog.push(type, detail)
+      );
+    } catch (error) {
+      if (isUnknownOrderError(error)) {
+        this.tradeLog.push("order", "深度不平衡平仓时订单已不存在");
+      } else {
+        this.tradeLog.push("error", `深度不平衡平仓失败: ${String(error)}`);
+      }
+    }
+    return true;
   }
 
   private async syncOrders(targets: DesiredOrder[]): Promise<void> {
@@ -399,7 +485,7 @@ export class MakerEngine {
     }
   }
 
-  private buildSnapshot(): MakerEngineSnapshot {
+  private buildSnapshot(): OffsetMakerEngineSnapshot {
     const position = getPosition(this.accountSnapshot, this.config.symbol);
     const bid = this.depthSnapshot?.bids?.[0]?.[0];
     const ask = this.depthSnapshot?.asks?.[0]?.[0];
@@ -427,6 +513,11 @@ export class MakerEngine {
       desiredOrders: this.desiredOrders,
       tradeLog: this.tradeLog.all(),
       lastUpdated: Date.now(),
+      buyDepthSum10: this.lastBuyDepthSum10,
+      sellDepthSum10: this.lastSellDepthSum10,
+      depthImbalance: this.lastImbalance,
+      skipBuySide: this.lastSkipBuy,
+      skipSellSide: this.lastSkipSell,
     };
   }
 
@@ -458,5 +549,4 @@ export class MakerEngine {
     }
     return null;
   }
-
 }

@@ -2,9 +2,10 @@ import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { TrendApp } from "./TrendApp";
 import { MakerApp } from "./MakerApp";
+import { OffsetMakerApp } from "./OffsetMakerApp";
 
 interface StrategyOption {
-  id: "trend" | "maker";
+  id: "trend" | "maker" | "offset-maker";
   label: string;
   description: string;
   component: React.ComponentType<{ onExit: () => void }>;
@@ -22,6 +23,12 @@ const STRATEGIES: StrategyOption[] = [
     label: "做市刷单策略",
     description: "双边挂单提供流动性，自动追价与风控止损",
     component: MakerApp,
+  },
+  {
+    id: "offset-maker",
+    label: "偏移做市策略",
+    description: "根据盘口深度自动偏移挂单并在极端不平衡时撤退",
+    component: OffsetMakerApp,
   },
 ];
 
