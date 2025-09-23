@@ -309,7 +309,11 @@ export class MakerEngine {
           target.price,
           target.amount,
           (type, detail) => this.tradeLog.push(type, detail),
-          target.reduceOnly
+          target.reduceOnly,
+          {
+            markPrice: getPosition(this.accountSnapshot, this.config.symbol).markPrice,
+            maxPct: this.config.maxCloseSlippagePct,
+          }
         );
       } catch (error) {
         this.tradeLog.push("error", `挂单失败(${target.side} ${target.price}): ${String(error)}`);
@@ -345,6 +349,9 @@ export class MakerEngine {
     );
 
     if (derivedLoss || snapshotLoss) {
+      // 价格操纵保护：只有平仓方向价格与标记价格在阈值内才允许市价平仓
+      const closeSideIsSell = position.positionAmt > 0;
+      const closeSidePrice = closeSideIsSell ? bidPrice : askPrice;
       this.tradeLog.push(
         "stop",
         `触发止损，方向=${position.positionAmt > 0 ? "多" : "空"} 当前亏损=${pnl.toFixed(4)} USDT`
@@ -360,7 +367,12 @@ export class MakerEngine {
           this.pending,
           position.positionAmt > 0 ? "SELL" : "BUY",
           absPosition,
-          (type, detail) => this.tradeLog.push(type, detail)
+          (type, detail) => this.tradeLog.push(type, detail),
+          {
+            markPrice: position.markPrice,
+            expectedPrice: Number(closeSidePrice) || null,
+            maxPct: this.config.maxCloseSlippagePct,
+          }
         );
       } catch (error) {
         if (isUnknownOrderError(error)) {

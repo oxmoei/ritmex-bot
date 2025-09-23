@@ -306,6 +306,9 @@ export class OffsetMakerEngine {
     if (!longExitRequired && !shortExitRequired) return false;
 
     const side: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
+    const bid = Number(this.depthSnapshot?.bids?.[0]?.[0]);
+    const ask = Number(this.depthSnapshot?.asks?.[0]?.[0]);
+    const closeSidePrice = side === "SELL" ? bid : ask;
     this.tradeLog.push(
       "stop",
       `深度极端不平衡(${buySum.toFixed(4)} vs ${sellSum.toFixed(4)}), 市价平仓 ${side}`
@@ -321,7 +324,12 @@ export class OffsetMakerEngine {
         this.pending,
         side,
         absPosition,
-        (type, detail) => this.tradeLog.push(type, detail)
+        (type, detail) => this.tradeLog.push(type, detail),
+        {
+          markPrice: position.markPrice,
+          expectedPrice: Number(closeSidePrice) || null,
+          maxPct: this.config.maxCloseSlippagePct,
+        }
       );
     } catch (error) {
       if (isUnknownOrderError(error)) {
@@ -396,7 +404,11 @@ export class OffsetMakerEngine {
           target.price,
           target.amount,
           (type, detail) => this.tradeLog.push(type, detail),
-          target.reduceOnly
+          target.reduceOnly,
+          {
+            markPrice: getPosition(this.accountSnapshot, this.config.symbol).markPrice,
+            maxPct: this.config.maxCloseSlippagePct,
+          }
         );
       } catch (error) {
         this.tradeLog.push("error", `挂单失败(${target.side} ${target.price}): ${String(error)}`);
@@ -447,7 +459,12 @@ export class OffsetMakerEngine {
           this.pending,
           position.positionAmt > 0 ? "SELL" : "BUY",
           absPosition,
-          (type, detail) => this.tradeLog.push(type, detail)
+          (type, detail) => this.tradeLog.push(type, detail),
+          {
+            markPrice: position.markPrice,
+            expectedPrice: Number(position.positionAmt > 0 ? bidPrice : askPrice) || null,
+            maxPct: this.config.maxCloseSlippagePct,
+          }
         );
       } catch (error) {
         if (isUnknownOrderError(error)) {

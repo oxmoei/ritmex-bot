@@ -9,6 +9,7 @@ export interface TradingConfig {
   pollIntervalMs: number;
   maxLogEntries: number;
   klineInterval: string;
+  maxCloseSlippagePct: number;
 }
 
 function parseNumber(value: string | undefined, fallback: number): number {
@@ -28,6 +29,7 @@ export const tradingConfig: TradingConfig = {
   pollIntervalMs: parseNumber(process.env.POLL_INTERVAL_MS, 500),
   maxLogEntries: parseNumber(process.env.MAX_LOG_ENTRIES, 200),
   klineInterval: process.env.KLINE_INTERVAL ?? "1m",
+  maxCloseSlippagePct: parseNumber(process.env.MAX_CLOSE_SLIPPAGE_PCT, 0.05),
 };
 
 export interface MakerConfig {
@@ -39,6 +41,7 @@ export interface MakerConfig {
   askOffset: number;
   refreshIntervalMs: number;
   maxLogEntries: number;
+  maxCloseSlippagePct: number;
 }
 
 export const makerConfig: MakerConfig = {
@@ -50,4 +53,8 @@ export const makerConfig: MakerConfig = {
   askOffset: parseNumber(process.env.MAKER_ASK_OFFSET, 0),
   refreshIntervalMs: parseNumber(process.env.MAKER_REFRESH_INTERVAL_MS, 1500),
   maxLogEntries: parseNumber(process.env.MAKER_MAX_LOG_ENTRIES, 200),
+  maxCloseSlippagePct: parseNumber(
+    process.env.MAKER_MAX_CLOSE_SLIPPAGE_PCT ?? process.env.MAX_CLOSE_SLIPPAGE_PCT,
+    0.05
+  ),
 };

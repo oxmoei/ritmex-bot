@@ -4,15 +4,16 @@ export interface PositionSnapshot {
   positionAmt: number;
   entryPrice: number;
   unrealizedProfit: number;
+  markPrice: number | null;
 }
 
 export function getPosition(snapshot: AsterAccountSnapshot | null, symbol: string): PositionSnapshot {
   if (!snapshot) {
-    return { positionAmt: 0, entryPrice: 0, unrealizedProfit: 0 };
+    return { positionAmt: 0, entryPrice: 0, unrealizedProfit: 0, markPrice: null };
   }
   const positions = snapshot.positions?.filter((p) => p.symbol === symbol) ?? [];
   if (positions.length === 0) {
-    return { positionAmt: 0, entryPrice: 0, unrealizedProfit: 0 };
+    return { positionAmt: 0, entryPrice: 0, unrealizedProfit: 0, markPrice: null };
   }
   const NON_ZERO_EPS = 1e-8;
   const withExposure = positions.filter((p) => Math.abs(Number(p.positionAmt)) > NON_ZERO_EPS);
@@ -20,10 +21,13 @@ export function getPosition(snapshot: AsterAccountSnapshot | null, symbol: strin
     withExposure.find((p) => p.positionSide === "BOTH") ??
     withExposure.sort((a, b) => Math.abs(Number(b.positionAmt)) - Math.abs(Number(a.positionAmt)))[0] ??
     positions[0];
+  const rawMark = Number(selected?.markPrice);
+  const markPrice = Number.isFinite(rawMark) && rawMark > 0 ? rawMark : null;
   return {
     positionAmt: Number(selected?.positionAmt) || 0,
     entryPrice: Number(selected?.entryPrice) || 0,
     unrealizedProfit: Number(selected?.unrealizedProfit) || 0,
+    markPrice,
   };
 }
 
@@ -46,4 +50,26 @@ export function calcTrailingActivationPrice(entryPrice: number, qty: number, sid
     return entryPrice + profit / qty;
   }
   return entryPrice - profit / Math.abs(qty);
+}
+
+/**
+ * Return true if the intended order price is within the allowed deviation from mark price.
+ * - For BUY: orderPrice must be <= markPrice * (1 + maxPct)
+ * - For SELL: orderPrice must be >= markPrice * (1 - maxPct)
+ * If markPrice is null/invalid, the check passes (no protection possible).
+ */
+export function isOrderPriceAllowedByMark(params: {
+  side: "BUY" | "SELL";
+  orderPrice: number | null | undefined;
+  markPrice: number | null | undefined;
+  maxPct: number;
+}): boolean {
+  const { side, orderPrice, markPrice, maxPct } = params;
+  const price = Number(orderPrice);
+  const mark = Number(markPrice);
+  if (!Number.isFinite(price) || !Number.isFinite(mark) || mark <= 0) return true;
+  if (side === "BUY") {
+    return price <= mark * (1 + Math.max(0, maxPct));
+  }
+  return price >= mark * (1 - Math.max(0, maxPct));
 }

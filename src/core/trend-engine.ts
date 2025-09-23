@@ -286,7 +286,13 @@ export class TrendEngine {
         this.pending,
         side,
         this.config.tradeAmount,
-        (type, detail) => this.tradeLog.push(type, detail)
+        (type, detail) => this.tradeLog.push(type, detail),
+        false,
+        {
+          markPrice: getPosition(this.accountSnapshot, this.config.symbol).markPrice,
+          expectedPrice: Number(this.tickerSnapshot?.lastPrice) || null,
+          maxPct: this.config.maxCloseSlippagePct,
+        }
       );
       this.tradeLog.push("open", `${reason}: ${side} @ ${price}`);
       this.lastOpenPlan = { side, price };
@@ -395,6 +401,23 @@ export class TrendEngine {
             }
           }
         }
+        // 价格操纵保护：仅当平仓方向价格与标记价格偏离在阈值内才执行市价平仓
+        const mark = getPosition(this.accountSnapshot, this.config.symbol).markPrice;
+        const limitPct = this.config.maxCloseSlippagePct;
+        const sideIsSell = direction === "long";
+        const depthBid = Number(this.depthSnapshot?.bids?.[0]?.[0]);
+        const depthAsk = Number(this.depthSnapshot?.asks?.[0]?.[0]);
+        const closeSidePrice = sideIsSell ? depthBid : depthAsk;
+        if (mark != null && Number.isFinite(mark) && mark > 0 && Number.isFinite(closeSidePrice)) {
+          const pctDiff = Math.abs(closeSidePrice - mark) / mark;
+          if (pctDiff > limitPct) {
+            this.tradeLog.push(
+              "info",
+              `市价平仓保护触发：closePx=${Number(closeSidePrice).toFixed(2)} mark=${mark.toFixed(2)} 偏离 ${(pctDiff * 100).toFixed(2)}% > ${(limitPct * 100).toFixed(2)}%`
+            );
+            return { closed: false, pnl };
+          }
+        }
         await marketClose(
           this.exchange,
           this.config.symbol,
@@ -404,7 +427,16 @@ export class TrendEngine {
           this.pending,
           direction === "long" ? "SELL" : "BUY",
           Math.abs(position.positionAmt),
-          (type, detail) => this.tradeLog.push(type, detail)
+          (type, detail) => this.tradeLog.push(type, detail),
+          {
+            markPrice: getPosition(this.accountSnapshot, this.config.symbol).markPrice,
+            expectedPrice: Number(
+              direction === "long"
+                ? this.depthSnapshot?.bids?.[0]?.[0]
+                : this.depthSnapshot?.asks?.[0]?.[0]
+            ) || null,
+            maxPct: this.config.maxCloseSlippagePct,
+          }
         );
         this.tradeLog.push("close", `止损平仓: ${direction === "long" ? "SELL" : "BUY"}`);
       } catch (err) {
@@ -439,7 +471,11 @@ export class TrendEngine {
         stopPrice,
         quantity,
         lastPrice,
-        (type, detail) => this.tradeLog.push(type, detail)
+        (type, detail) => this.tradeLog.push(type, detail),
+        {
+          markPrice: position.markPrice,
+          maxPct: this.config.maxCloseSlippagePct,
+        }
       );
     } catch (err) {
       this.tradeLog.push("error", `挂止损单失败: ${String(err)}`);
@@ -484,7 +520,11 @@ export class TrendEngine {
         activationPrice,
         quantity,
         this.config.trailingCallbackRate,
-        (type, detail) => this.tradeLog.push(type, detail)
+        (type, detail) => this.tradeLog.push(type, detail),
+        {
+          markPrice: getPosition(this.accountSnapshot, this.config.symbol).markPrice,
+          maxPct: this.config.maxCloseSlippagePct,
+        }
       );
     } catch (err) {
       this.tradeLog.push("error", `挂动态止盈失败: ${String(err)}`);

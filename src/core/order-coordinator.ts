@@ -2,11 +2,44 @@ import type { ExchangeAdapter } from "../exchanges/adapter";
 import type { AsterOrder, CreateOrderParams } from "../exchanges/types";
 import { toPrice1Decimal, toQty3Decimal } from "../utils/math";
 import { isUnknownOrderError } from "../utils/errors";
+import { isOrderPriceAllowedByMark } from "../utils/strategy";
 
 export type OrderLockMap = Record<string, boolean>;
 export type OrderTimerMap = Record<string, ReturnType<typeof setTimeout> | null>;
 export type OrderPendingMap = Record<string, string | null>;
 export type LogHandler = (type: string, detail: string) => void;
+
+type OrderGuardOptions = {
+  markPrice?: number | null;
+  expectedPrice?: number | null;
+  maxPct?: number;
+};
+
+function enforceMarkPriceGuard(
+  side: "BUY" | "SELL",
+  toCheckPrice: number | null | undefined,
+  guard: OrderGuardOptions | undefined,
+  log: LogHandler,
+  context: string
+): boolean {
+  if (!guard || guard.maxPct == null) return true;
+  const allowed = isOrderPriceAllowedByMark({
+    side,
+    orderPrice: toCheckPrice,
+    markPrice: guard.markPrice,
+    maxPct: guard.maxPct,
+  });
+  if (!allowed) {
+    const priceStr = Number.isFinite(Number(toCheckPrice)) ? Number(toCheckPrice).toFixed(2) : String(toCheckPrice);
+    const markStr = Number.isFinite(Number(guard.markPrice)) ? Number(guard.markPrice).toFixed(2) : String(guard.markPrice);
+    log(
+      "info",
+      `${context} 保护触发：side=${side} price=${priceStr} mark=${markStr} 超过 ${(guard.maxPct! * 100).toFixed(2)}%`
+    );
+    return false;
+  }
+  return true;
+}
 
 export function isOperating(locks: OrderLockMap, type: string): boolean {
   return Boolean(locks[type]);
@@ -92,10 +125,12 @@ export async function placeOrder(
   price: number,
   amount: number,
   log: LogHandler,
-  reduceOnly = false
+  reduceOnly = false,
+  guard?: OrderGuardOptions
 ): Promise<AsterOrder | undefined> {
   const type = "LIMIT";
   if (isOperating(locks, type)) return;
+  if (!enforceMarkPriceGuard(side, price, guard, log, "限价单")) return;
   const params: CreateOrderParams = {
     symbol,
     side,
@@ -132,10 +167,12 @@ export async function placeMarketOrder(
   side: "BUY" | "SELL",
   amount: number,
   log: LogHandler,
-  reduceOnly = false
+  reduceOnly = false,
+  guard?: OrderGuardOptions
 ): Promise<AsterOrder | undefined> {
   const type = "MARKET";
   if (isOperating(locks, type)) return;
+  if (!enforceMarkPriceGuard(side, guard?.expectedPrice ?? null, guard, log, "市价单")) return;
   const params: CreateOrderParams = {
     symbol,
     side,
@@ -171,10 +208,12 @@ export async function placeStopLossOrder(
   stopPrice: number,
   quantity: number,
   lastPrice: number | null,
-  log: LogHandler
+  log: LogHandler,
+  guard?: OrderGuardOptions
 ): Promise<AsterOrder | undefined> {
   const type = "STOP_MARKET";
   if (isOperating(locks, type)) return;
+  if (!enforceMarkPriceGuard(side, stopPrice, guard, log, "止损单")) return;
   if (lastPrice != null) {
     if (side === "SELL" && stopPrice >= lastPrice) {
       log("error", `止损价 ${stopPrice} 高于或等于当前价 ${lastPrice}，取消挂单`);
@@ -222,10 +261,12 @@ export async function placeTrailingStopOrder(
   activationPrice: number,
   quantity: number,
   callbackRate: number,
-  log: LogHandler
+  log: LogHandler,
+  guard?: OrderGuardOptions
 ): Promise<AsterOrder | undefined> {
   const type = "TRAILING_STOP_MARKET";
   if (isOperating(locks, type)) return;
+  if (!enforceMarkPriceGuard(side, activationPrice, guard, log, "动态止盈单")) return;
   const params: CreateOrderParams = {
     symbol,
     side,
@@ -265,10 +306,12 @@ export async function marketClose(
   pendings: OrderPendingMap,
   side: "BUY" | "SELL",
   quantity: number,
-  log: LogHandler
+  log: LogHandler,
+  guard?: OrderGuardOptions
 ): Promise<void> {
   const type = "MARKET";
   if (isOperating(locks, type)) return;
+  if (!enforceMarkPriceGuard(side, guard?.expectedPrice ?? null, guard, log, "市价平仓")) return;
   const params: CreateOrderParams = {
     symbol,
     side,
