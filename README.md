@@ -13,6 +13,7 @@
    cp .env.example .env
    ```
    然后根据需要修改 `.env` 中的配置项：
+   - API KEY 获取地址 [https://www.asterdex.com/zh-CN/api-management](https://www.asterdex.com/zh-CN/api-management)
    - `ASTER_API_KEY` / `ASTER_API_SECRET`：Aster 交易所提供的 API 凭证，必须具备合约交易权限。
    - `TRADE_SYMBOL`：策略运行的交易对（默认 `BTCUSDT`），需与 API 权限范围一致。
    - `TRADE_AMOUNT`：单次下单数量（合约张数折算后单位为标的货币，例如 BTC）。
