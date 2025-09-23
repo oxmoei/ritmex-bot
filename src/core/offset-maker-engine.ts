@@ -108,52 +108,93 @@ export class OffsetMakerEngine {
   }
 
   private bootstrap(): void {
-    this.exchange.watchAccount((snapshot) => {
-      this.accountSnapshot = snapshot;
-      const totalUnrealized = Number(snapshot.totalUnrealizedProfit ?? "0");
-      if (Number.isFinite(totalUnrealized)) {
-        this.accountUnrealized = totalUnrealized;
-      }
-      const position = getPosition(snapshot, this.config.symbol);
-      this.updateSessionVolume(position);
-      this.emitUpdate();
-    });
-
-    this.exchange.watchOrders((orders) => {
-      this.syncLocksWithOrders(orders);
-      this.openOrders = Array.isArray(orders)
-        ? orders.filter((order) => order.type !== "MARKET" && order.symbol === this.config.symbol)
-        : [];
-      const currentIds = new Set(this.openOrders.map((order) => order.orderId));
-      for (const id of Array.from(this.pendingCancelOrders)) {
-        if (!currentIds.has(id)) {
-          this.pendingCancelOrders.delete(id);
+    try {
+      this.exchange.watchAccount((snapshot) => {
+        try {
+          this.accountSnapshot = snapshot;
+          const totalUnrealized = Number(snapshot.totalUnrealizedProfit ?? "0");
+          if (Number.isFinite(totalUnrealized)) {
+            this.accountUnrealized = totalUnrealized;
+          }
+          const position = getPosition(snapshot, this.config.symbol);
+          this.updateSessionVolume(position);
+          this.emitUpdate();
+        } catch (err) {
+          this.tradeLog.push("error", `账户推送处理异常: ${String(err)}`);
         }
-      }
-      this.initialOrderSnapshotReady = true;
-      this.emitUpdate();
-    });
+      });
+    } catch (err) {
+      this.tradeLog.push("error", `订阅账户失败: ${String(err)}`);
+    }
 
-    this.exchange.watchDepth(this.config.symbol, (depth) => {
-      this.depthSnapshot = depth;
-      this.emitUpdate();
-    });
+    try {
+      this.exchange.watchOrders((orders) => {
+        try {
+          this.syncLocksWithOrders(orders);
+          this.openOrders = Array.isArray(orders)
+            ? orders.filter((order) => order.type !== "MARKET" && order.symbol === this.config.symbol)
+            : [];
+          const currentIds = new Set(this.openOrders.map((order) => order.orderId));
+          for (const id of Array.from(this.pendingCancelOrders)) {
+            if (!currentIds.has(id)) {
+              this.pendingCancelOrders.delete(id);
+            }
+          }
+          this.initialOrderSnapshotReady = true;
+          this.emitUpdate();
+        } catch (err) {
+          this.tradeLog.push("error", `订单推送处理异常: ${String(err)}`);
+        }
+      });
+    } catch (err) {
+      this.tradeLog.push("error", `订阅订单失败: ${String(err)}`);
+    }
 
-    this.exchange.watchTicker(this.config.symbol, (ticker) => {
-      this.tickerSnapshot = ticker;
-      this.emitUpdate();
-    });
+    try {
+      this.exchange.watchDepth(this.config.symbol, (depth) => {
+        try {
+          this.depthSnapshot = depth;
+          this.emitUpdate();
+        } catch (err) {
+          this.tradeLog.push("error", `深度推送处理异常: ${String(err)}`);
+        }
+      });
+    } catch (err) {
+      this.tradeLog.push("error", `订阅深度失败: ${String(err)}`);
+    }
 
-    this.exchange.watchKlines(this.config.symbol, "1m", () => {
-      /* no-op */
-    });
+    try {
+      this.exchange.watchTicker(this.config.symbol, (ticker) => {
+        try {
+          this.tickerSnapshot = ticker;
+          this.emitUpdate();
+        } catch (err) {
+          this.tradeLog.push("error", `价格推送处理异常: ${String(err)}`);
+        }
+      });
+    } catch (err) {
+      this.tradeLog.push("error", `订阅Ticker失败: ${String(err)}`);
+    }
+
+    try {
+      this.exchange.watchKlines(this.config.symbol, "1m", () => {
+        try {
+          /* no-op */
+        } catch (err) {
+          this.tradeLog.push("error", `K线推送处理异常: ${String(err)}`);
+        }
+      });
+    } catch (err) {
+      this.tradeLog.push("error", `订阅K线失败: ${String(err)}`);
+    }
   }
 
-  private syncLocksWithOrders(orders: AsterOrder[]): void {
+  private syncLocksWithOrders(orders: AsterOrder[] | null | undefined): void {
+    const list = Array.isArray(orders) ? orders : [];
     Object.keys(this.pending).forEach((type) => {
       const pendingId = this.pending[type];
       if (!pendingId) return;
-      const match = orders.find((order) => String(order.orderId) === pendingId);
+      const match = list.find((order) => String(order.orderId) === pendingId);
       if (!match || (match.status && match.status !== "NEW" && match.status !== "PARTIALLY_FILLED")) {
         unlockOperating(this.locks, this.timers, this.pending, type);
       }
@@ -499,10 +540,20 @@ export class OffsetMakerEngine {
   }
 
   private emitUpdate(): void {
-    const snapshot = this.buildSnapshot();
-    const handlers = this.listeners.get("update");
-    if (handlers) {
-      handlers.forEach((handler) => handler(snapshot));
+    try {
+      const snapshot = this.buildSnapshot();
+      const handlers = this.listeners.get("update");
+      if (handlers) {
+        handlers.forEach((handler) => {
+          try {
+            handler(snapshot);
+          } catch (err) {
+            this.tradeLog.push("error", `更新回调处理异常: ${String(err)}`);
+          }
+        });
+      }
+    } catch (err) {
+      this.tradeLog.push("error", `快照或更新分发异常: ${String(err)}`);
     }
   }
 
