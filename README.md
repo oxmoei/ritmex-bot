@@ -1,3 +1,17 @@
+# 快速上手（小白友好版）
+1. 安装 [Bun](https://bun.com) ≥ 1.2，并执行 `bun install` 下载安装依赖。
+2. 复制 `.env.example` 为 `.env` 并填入你的 Aster API Key/Secret，例如：
+   ```bash
+   cp .env.example .env
+   ```
+   然后修改 `.env` 中的配置项（交易对、下单量、风控等）。
+3. 运行机器人：
+   ```bash
+   bun run index.ts
+   ```
+   在终端中按 ↑/↓ 选择 “趋势策略” 或 “做市策略”，回车启动。按 `Esc` 可返回选择菜单，`Ctrl+C` 退出。
+4. 仿真/测试环境建议先设置极小仓位；真实资金请确保 API 仅开启所需权限，并先在低金额下验证策略行为。
+
 # ritmex-bot
 
 A Bun-powered trading workstation for Aster perpetual contracts. The project ships two production strategies—an SMA30 trend follower and a dual-sided maker—that share a modular gateway, UI, and persistence layer. Everything runs in the terminal via Ink, with live websocket refresh and automatic recovery from restarts or network failures.
