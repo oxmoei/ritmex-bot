@@ -14,6 +14,8 @@ import {
   getSMA,
   type PositionSnapshot,
 } from "../utils/strategy";
+import { computePositionPnl } from "../utils/pnl";
+import { getTopPrices, getMidOrLast } from "../utils/price";
 import {
   marketClose,
   placeMarketOrder,
@@ -601,11 +603,7 @@ export class TrendEngine {
       : price < sma30
       ? "做空"
       : "无信号";
-    const pnl = price != null && position
-      ? (position.positionAmt > 0
-          ? (price - position.entryPrice) * Math.abs(position.positionAmt)
-          : (position.entryPrice - price) * Math.abs(position.positionAmt))
-      : 0;
+    const pnl = price != null ? computePositionPnl(position, price, price) : 0;
     return {
       ready: this.isReady(),
       symbol: this.config.symbol,
@@ -646,17 +644,7 @@ export class TrendEngine {
   }
 
   private getReferencePrice(): number | null {
-    if (this.tickerSnapshot) {
-      const last = Number(this.tickerSnapshot.lastPrice);
-      if (Number.isFinite(last)) return last;
-    }
-    if (this.depthSnapshot) {
-      const bid = Number(this.depthSnapshot.bids?.[0]?.[0]);
-      const ask = Number(this.depthSnapshot.asks?.[0]?.[0]);
-      if (Number.isFinite(bid) && Number.isFinite(ask)) return (bid + ask) / 2;
-    }
-    if (this.lastPrice != null && Number.isFinite(this.lastPrice)) return this.lastPrice;
-    return null;
+    return getMidOrLast(this.depthSnapshot, this.tickerSnapshot) ?? (this.lastPrice != null && Number.isFinite(this.lastPrice) ? this.lastPrice : null);
   }
 
 }

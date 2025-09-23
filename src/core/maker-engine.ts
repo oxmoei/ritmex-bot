@@ -10,12 +10,17 @@ import { toPrice1Decimal } from "../utils/math";
 import { createTradeLog, type TradeLogEntry } from "../state/trade-log";
 import { isUnknownOrderError } from "../utils/errors";
 import { getPosition, type PositionSnapshot } from "../utils/strategy";
+import { computePositionPnl } from "../utils/pnl";
+import { getTopPrices, getMidOrLast } from "../utils/price";
+import { shouldStopLoss } from "../utils/risk";
 import {
   marketClose,
   placeOrder,
   unlockOperating,
 } from "./order-coordinator";
 import type { OrderLockMap, OrderPendingMap, OrderTimerMap } from "./order-coordinator";
+import { makeOrderPlan } from "./lib/order-plan";
+import { safeCancelOrder } from "./lib/orders";
 
 interface DesiredOrder {
   side: "BUY" | "SELL";
@@ -221,17 +226,14 @@ export class MakerEngine {
       }
 
       const depth = this.depthSnapshot!;
-      const bidLevel = depth.bids?.[0];
-      const askLevel = depth.asks?.[0];
-      const topBid = bidLevel ? Number(bidLevel[0]) : undefined;
-      const topAsk = askLevel ? Number(askLevel[0]) : undefined;
-      if (!Number.isFinite(topBid) || !Number.isFinite(topAsk)) {
+      const { topBid, topAsk } = getTopPrices(depth);
+      if (topBid == null || topAsk == null) {
         this.emitUpdate();
         return;
       }
 
-      const bidPrice = toPrice1Decimal(topBid! - this.config.bidOffset);
-      const askPrice = toPrice1Decimal(topAsk! + this.config.askOffset);
+      const bidPrice = toPrice1Decimal(topBid - this.config.bidOffset);
+      const askPrice = toPrice1Decimal(topAsk + this.config.askOffset);
       const position = getPosition(this.accountSnapshot, this.config.symbol);
       const absPosition = Math.abs(position.positionAmt);
       const desired: DesiredOrder[] = [];
@@ -290,52 +292,36 @@ export class MakerEngine {
 
   private async syncOrders(targets: DesiredOrder[]): Promise<void> {
     const tolerance = this.config.priceChaseThreshold;
-    const unmatched = new Set(targets.map((_, idx) => idx));
-    const toCancel: AsterOrder[] = [];
-
-    for (const order of this.openOrders) {
-      const price = Number(order.price);
-      if (!Number.isFinite(price)) {
-        toCancel.push(order);
-        continue;
-      }
-      const reduceOnly = order.reduceOnly === true;
-      if (this.pendingCancelOrders.has(order.orderId)) {
-        continue;
-      }
-      const matchedIndex = targets.findIndex((target, index) => {
-        if (!unmatched.has(index)) return false;
-        if (target.side !== order.side) return false;
-        if (target.reduceOnly !== reduceOnly) return false;
-        return Math.abs(price - target.price) <= tolerance;
-      });
-      if (matchedIndex >= 0) {
-        unmatched.delete(matchedIndex);
-        continue;
-      }
-      toCancel.push(order);
-    }
+    const availableOrders = this.openOrders.filter((o) => !this.pendingCancelOrders.has(o.orderId));
+    const { toCancel, toPlace } = makeOrderPlan(availableOrders, targets, tolerance);
 
     for (const order of toCancel) {
+      if (this.pendingCancelOrders.has(order.orderId)) continue;
       this.pendingCancelOrders.add(order.orderId);
-      try {
-        await this.exchange.cancelOrder({ symbol: this.config.symbol, orderId: order.orderId });
-        this.tradeLog.push("order", `撤销不匹配订单 ${order.side} @ ${order.price} reduceOnly=${order.reduceOnly}`);
-      } catch (error) {
-        if (isUnknownOrderError(error)) {
+      await safeCancelOrder(
+        this.exchange,
+        this.config.symbol,
+        order,
+        () => {
+          this.tradeLog.push(
+            "order",
+            `撤销不匹配订单 ${order.side} @ ${order.price} reduceOnly=${order.reduceOnly}`
+          );
+        },
+        () => {
           this.tradeLog.push("order", "撤销时发现订单已被成交/取消，忽略");
           this.pendingCancelOrders.delete(order.orderId);
           this.openOrders = this.openOrders.filter((existing) => existing.orderId !== order.orderId);
-        } else {
+        },
+        (error) => {
           this.tradeLog.push("error", `撤销订单失败: ${String(error)}`);
           this.pendingCancelOrders.delete(order.orderId);
           this.openOrders = this.openOrders.filter((existing) => existing.orderId !== order.orderId);
         }
-      }
+      );
     }
 
-    for (const index of unmatched) {
-      const target = targets[index];
+    for (const target of toPlace) {
       if (!target) continue;
       if (target.amount < EPS) continue;
       try {
@@ -376,20 +362,10 @@ export class MakerEngine {
     }
     this.entryPricePendingLogged = false;
 
-    const pnl = position.positionAmt > 0
-      ? (bidPrice - position.entryPrice) * absPosition
-      : (position.entryPrice - askPrice) * absPosition;
-    const unrealized = Number.isFinite(position.unrealizedProfit)
-      ? position.unrealizedProfit
-      : null;
-    const derivedLoss = pnl < -this.config.lossLimit;
-    const snapshotLoss = Boolean(
-      unrealized != null &&
-        unrealized < -this.config.lossLimit &&
-        pnl <= 0
-    );
+    const pnl = computePositionPnl(position, bidPrice, askPrice);
+    const triggerStop = shouldStopLoss(position, bidPrice, askPrice, this.config.lossLimit);
 
-    if (derivedLoss || snapshotLoss) {
+    if (triggerStop) {
       // 价格操纵保护：只有平仓方向价格与标记价格在阈值内才允许市价平仓
       const closeSideIsSell = position.positionAmt > 0;
       const closeSidePrice = closeSideIsSell ? bidPrice : askPrice;
@@ -430,20 +406,24 @@ export class MakerEngine {
     for (const order of this.openOrders) {
       if (this.pendingCancelOrders.has(order.orderId)) continue;
       this.pendingCancelOrders.add(order.orderId);
-      try {
-        await this.exchange.cancelOrder({ symbol: this.config.symbol, orderId: order.orderId });
-      } catch (error) {
-        if (isUnknownOrderError(error)) {
+      await safeCancelOrder(
+        this.exchange,
+        this.config.symbol,
+        order,
+        () => {
+          // 成功撤销不记录日志，保持现有行为
+        },
+        () => {
           this.tradeLog.push("order", "订单已不存在，撤销跳过");
           this.pendingCancelOrders.delete(order.orderId);
           this.openOrders = this.openOrders.filter((existing) => existing.orderId !== order.orderId);
-        } else {
+        },
+        (error) => {
           this.tradeLog.push("error", `撤销订单失败: ${String(error)}`);
           this.pendingCancelOrders.delete(order.orderId);
-          // 与偏移做市保持一致：移除本地缓存中的异常订单，等待订单流推送重建
           this.openOrders = this.openOrders.filter((existing) => existing.orderId !== order.orderId);
         }
-      }
+      );
     }
   }
 
@@ -467,23 +447,15 @@ export class MakerEngine {
 
   private buildSnapshot(): MakerEngineSnapshot {
     const position = getPosition(this.accountSnapshot, this.config.symbol);
-    const bid = this.depthSnapshot?.bids?.[0]?.[0];
-    const ask = this.depthSnapshot?.asks?.[0]?.[0];
-    const bidNum = Number(bid);
-    const askNum = Number(ask);
-    const spread = Number.isFinite(bidNum) && Number.isFinite(askNum) ? askNum - bidNum : null;
-    const priceForPnl = position.positionAmt > 0 ? bidNum : askNum;
-    const pnl = Number.isFinite(priceForPnl)
-      ? (position.positionAmt > 0
-          ? (priceForPnl! - position.entryPrice) * Math.abs(position.positionAmt)
-          : (position.entryPrice - priceForPnl!) * Math.abs(position.positionAmt))
-      : 0;
+    const { topBid, topAsk } = getTopPrices(this.depthSnapshot);
+    const spread = topBid != null && topAsk != null ? topAsk - topBid : null;
+    const pnl = computePositionPnl(position, topBid, topAsk);
 
     return {
       ready: this.isReady(),
       symbol: this.config.symbol,
-      topBid: Number.isFinite(bidNum) ? bidNum : null,
-      topAsk: Number.isFinite(askNum) ? askNum : null,
+      topBid: topBid,
+      topAsk: topAsk,
       spread,
       position,
       pnl,
@@ -515,14 +487,6 @@ export class MakerEngine {
   }
 
   private getReferencePrice(): number | null {
-    const bid = Number(this.depthSnapshot?.bids?.[0]?.[0]);
-    const ask = Number(this.depthSnapshot?.asks?.[0]?.[0]);
-    if (Number.isFinite(bid) && Number.isFinite(ask)) return (bid + ask) / 2;
-    if (this.tickerSnapshot) {
-      const last = Number(this.tickerSnapshot.lastPrice);
-      if (Number.isFinite(last)) return last;
-    }
-    return null;
+    return getMidOrLast(this.depthSnapshot, this.tickerSnapshot);
   }
-
 }
