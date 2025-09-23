@@ -1,6 +1,7 @@
 import type { ExchangeAdapter } from "../exchanges/adapter";
 import type { AsterOrder, CreateOrderParams } from "../exchanges/types";
 import { toPrice1Decimal, toQty3Decimal } from "../utils/math";
+import { isUnknownOrderError } from "../utils/errors";
 
 export type OrderLockMap = Record<string, boolean>;
 export type OrderTimerMap = Record<string, ReturnType<typeof setTimeout> | null>;
@@ -70,7 +71,11 @@ export async function deduplicateOrders(
     await adapter.cancelOrders({ symbol, orderIdList });
     log("order", `去重撤销重复 ${type} 单: ${orderIdList.join(",")}`);
   } catch (err) {
-    log("error", `去重撤单失败: ${String(err)}`);
+    if (isUnknownOrderError(err)) {
+      log("order", "去重时发现订单已不存在，跳过删除");
+    } else {
+      log("error", `去重撤单失败: ${String(err)}`);
+    }
   } finally {
     unlockOperating(locks, timers, pendings, type);
   }
@@ -109,6 +114,10 @@ export async function placeOrder(
     return order;
   } catch (err) {
     unlockOperating(locks, timers, pendings, type);
+    if (isUnknownOrderError(err)) {
+      log("order", "订单已成交或被撤销，跳过新单");
+      return undefined;
+    }
     throw err;
   }
 }
@@ -143,6 +152,10 @@ export async function placeMarketOrder(
     return order;
   } catch (err) {
     unlockOperating(locks, timers, pendings, type);
+    if (isUnknownOrderError(err)) {
+      log("order", "市价单失败但订单已不存在，忽略");
+      return undefined;
+    }
     throw err;
   }
 }
@@ -190,6 +203,10 @@ export async function placeStopLossOrder(
     return order;
   } catch (err) {
     unlockOperating(locks, timers, pendings, type);
+    if (isUnknownOrderError(err)) {
+      log("order", "止损单已失效，跳过");
+      return undefined;
+    }
     throw err;
   }
 }
@@ -231,6 +248,10 @@ export async function placeTrailingStopOrder(
     return order;
   } catch (err) {
     unlockOperating(locks, timers, pendings, type);
+    if (isUnknownOrderError(err)) {
+      log("order", "动态止盈单已失效，跳过");
+      return undefined;
+    }
     throw err;
   }
 }
@@ -263,6 +284,10 @@ export async function marketClose(
     log("close", `市价平仓: ${side}`);
   } catch (err) {
     unlockOperating(locks, timers, pendings, type);
+    if (isUnknownOrderError(err)) {
+      log("order", "市场平仓时订单已不存在");
+      return;
+    }
     throw err;
   }
 }

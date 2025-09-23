@@ -79,8 +79,9 @@ export function TrendApp({ onExit }: TrendAppProps) {
 
   const { position, tradeLog, openOrders, trend, ready, lastPrice, sma30 } = snapshot;
   const hasPosition = Math.abs(position.positionAmt) > 1e-5;
-  const lastLogs = tradeLog.slice(-10);
-  const orderRows = openOrders.slice(0, 8).map((order) => ({
+  const lastLogs = tradeLog.slice(-5);
+  const sortedOrders = [...openOrders].sort((a, b) => (Number(b.updateTime ?? 0) - Number(a.updateTime ?? 0)) || Number(b.orderId) - Number(a.orderId));
+  const orderRows = sortedOrders.slice(0, 8).map((order) => ({
     id: order.orderId,
     side: order.side,
     type: order.type,
@@ -129,6 +130,9 @@ export function TrendApp({ onExit }: TrendAppProps) {
           <Text color="greenBright">绩效</Text>
           <Text>
             累计交易次数: {snapshot.totalTrades} ｜ 累计收益: {formatNumber(snapshot.totalProfit, 4)} USDT
+          </Text>
+          <Text>
+            累计成交量: {formatNumber(snapshot.sessionVolume, 2)} USDT
           </Text>
           {snapshot.lastOpenSignal.side ? (
             <Text color="gray">

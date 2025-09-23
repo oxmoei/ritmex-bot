@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ExchangeAdapter } from "../src/exchanges/adapter";
 import type { AsterOrder } from "../src/exchanges/types";
+import type { OrderLockMap, OrderTimerMap, OrderPendingMap } from "../src/core/order-coordinator";
 import {
   deduplicateOrders,
   placeOrder,
@@ -9,9 +10,6 @@ import {
   placeTrailingStopOrder,
   marketClose,
   unlockOperating,
-  OrderLockMap,
-  OrderTimerMap,
-  OrderPendingMap,
 } from "../src/core/order-coordinator";
 
 const baseOrder: AsterOrder = {
@@ -169,7 +167,7 @@ describe("order-coordinator", () => {
       timers,
       pending,
       "SELL",
-      "BUY",
+      1,
       log
     );
     expect(adapter.createOrder).toHaveBeenCalled();
@@ -178,7 +176,8 @@ describe("order-coordinator", () => {
 
   it("unlockOperating clears timers and pending", () => {
     const locks: OrderLockMap = { LIMIT: true };
-    const timers: OrderTimerMap = { LIMIT: setTimeout(() => undefined, 0) };
+    const fakeTimer = {} as ReturnType<typeof setTimeout>;
+    const timers: OrderTimerMap = { LIMIT: fakeTimer };
     const pending: OrderPendingMap = { LIMIT: "123" };
     unlockOperating(locks, timers, pending, "LIMIT");
     expect(locks.LIMIT).toBe(false);

@@ -79,7 +79,8 @@ export function MakerApp({ onExit }: MakerAppProps) {
   const topAsk = snapshot.topAsk;
   const spreadDisplay = snapshot.spread != null ? `${snapshot.spread.toFixed(4)} USDT` : "-";
   const hasPosition = Math.abs(snapshot.position.positionAmt) > 1e-5;
-  const openOrderRows = snapshot.openOrders.map((order) => ({
+  const sortedOrders = [...snapshot.openOrders].sort((a, b) => (Number(b.updateTime ?? 0) - Number(a.updateTime ?? 0)) || Number(b.orderId) - Number(a.orderId));
+  const openOrderRows = sortedOrders.slice(0, 8).map((order) => ({
     id: order.orderId,
     side: order.side,
     price: order.price,
@@ -113,7 +114,7 @@ export function MakerApp({ onExit }: MakerAppProps) {
     { key: "reduceOnly", header: "RO", minWidth: 4 },
   ];
 
-  const lastLogs = snapshot.tradeLog.slice(-10);
+  const lastLogs = snapshot.tradeLog.slice(-5);
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -135,6 +136,9 @@ export function MakerApp({ onExit }: MakerAppProps) {
               </Text>
               <Text>
                 浮动盈亏: {formatNumber(snapshot.pnl, 4)} USDT ｜ 账户未实现盈亏: {formatNumber(snapshot.accountUnrealized, 4)} USDT
+              </Text>
+              <Text>
+                累计成交量: {formatNumber(snapshot.sessionVolume, 2)} USDT
               </Text>
             </>
           ) : (

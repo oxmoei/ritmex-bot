@@ -22,9 +22,9 @@ import {
   unlockOperating,
 } from "./order-coordinator";
 import type { OrderLockMap, OrderPendingMap, OrderTimerMap } from "./order-coordinator";
+import { isUnknownOrderError } from "../utils/errors";
 import { toPrice1Decimal } from "../utils/math";
 import { createTradeLog, type TradeLogEntry } from "../state/trade-log";
-import { loadState, saveState } from "../utils/persistence";
 
 export interface TrendEngineSnapshot {
   ready: boolean;
@@ -37,6 +37,7 @@ export interface TrendEngineSnapshot {
   unrealized: number;
   totalProfit: number;
   totalTrades: number;
+  sessionVolume: number;
   tradeLog: TradeLogEntry[];
   openOrders: AsterOrder[];
   depth: AsterDepth | null;
@@ -74,18 +75,15 @@ export class TrendEngine {
   private totalProfit = 0;
   private totalTrades = 0;
   private lastOpenPlan: OpenOrderPlan = { side: null, price: null };
-  private savedStateApplied = false;
-  private readonly stateFile: string;
-  private lastPersistedAt = 0;
-  private savedOpenOrders: AsterOrder[] = [];
+  private sessionQuoteVolume = 0;
+  private prevPositionAmt = 0;
+  private initializedPosition = false;
 
   private readonly listeners = new Map<TrendEngineEvent, Set<TrendEngineListener>>();
 
   constructor(private readonly config: TradingConfig, private readonly exchange: ExchangeAdapter) {
     this.tradeLog = createTradeLog(this.config.maxLogEntries);
-    this.stateFile = `trend-${this.config.symbol}.json`;
     this.bootstrap();
-    void this.restoreState();
   }
 
   start(): void {
@@ -124,6 +122,8 @@ export class TrendEngine {
   private bootstrap(): void {
     this.exchange.watchAccount((snapshot) => {
       this.accountSnapshot = snapshot;
+      const position = getPosition(snapshot, this.config.symbol);
+      this.updateSessionVolume(position);
       this.emitUpdate();
     });
     this.exchange.watchOrders((orders) => {
@@ -131,7 +131,6 @@ export class TrendEngine {
       this.openOrders = Array.isArray(orders)
         ? orders.filter((order) => order.type !== "MARKET" && order.symbol === this.config.symbol)
         : [];
-      this.reconcileSavedOpenOrders();
       this.emitUpdate();
     });
     this.exchange.watchDepth(this.config.symbol, (depth) => {
@@ -194,6 +193,7 @@ export class TrendEngine {
         }
       }
 
+      this.updateSessionVolume(position);
       this.lastSma30 = sma30;
       this.lastPrice = price;
       this.emitUpdate();
@@ -309,7 +309,15 @@ export class TrendEngine {
       try {
         if (this.openOrders.length > 0) {
           const orderIdList = this.openOrders.map((order) => order.orderId);
-          await this.exchange.cancelOrders({ symbol: this.config.symbol, orderIdList });
+          try {
+            await this.exchange.cancelOrders({ symbol: this.config.symbol, orderIdList });
+          } catch (err) {
+            if (isUnknownOrderError(err)) {
+              this.tradeLog.push("order", "止损前撤单发现订单已不存在");
+            } else {
+              throw err;
+            }
+          }
         }
         await marketClose(
           this.exchange,
@@ -322,9 +330,13 @@ export class TrendEngine {
           this.config.tradeAmount,
           (type, detail) => this.tradeLog.push(type, detail)
         );
-        this.tradeLog.push("close", `止损平仓: ${direction === "long" ? "SELL" : "BUY"}`);
+      this.tradeLog.push("close", `止损平仓: ${direction === "long" ? "SELL" : "BUY"}`);
       } catch (err) {
-        this.tradeLog.push("error", `止损平仓失败: ${String(err)}`);
+        if (isUnknownOrderError(err)) {
+          this.tradeLog.push("order", "止损平仓时目标订单已不存在");
+        } else {
+          this.tradeLog.push("error", `止损平仓失败: ${String(err)}`);
+        }
       }
       return { closed: true, pnl };
     }
@@ -365,7 +377,11 @@ export class TrendEngine {
     try {
       await this.exchange.cancelOrder({ symbol: this.config.symbol, orderId: currentOrder.orderId });
     } catch (err) {
-      this.tradeLog.push("error", `取消原止损单失败: ${String(err)}`);
+      if (isUnknownOrderError(err)) {
+        this.tradeLog.push("order", "原止损单已不存在，跳过撤销");
+      } else {
+        this.tradeLog.push("error", `取消原止损单失败: ${String(err)}`);
+      }
     }
     await this.tryPlaceStopLoss(side, nextStopPrice, lastPrice);
     this.tradeLog.push("stop", `移动止损到 ${nextStopPrice}`);
@@ -401,7 +417,6 @@ export class TrendEngine {
     if (handlers) {
       handlers.forEach((handler) => handler(snapshot));
     }
-    void this.persistSnapshot(snapshot);
   }
 
   private buildSnapshot(): TrendEngineSnapshot {
@@ -431,6 +446,7 @@ export class TrendEngine {
       unrealized: position.unrealizedProfit,
       totalProfit: this.totalProfit,
       totalTrades: this.totalTrades,
+      sessionVolume: this.sessionQuoteVolume,
       tradeLog: this.tradeLog.all(),
       openOrders: this.openOrders,
       depth: this.depthSnapshot,
@@ -440,49 +456,36 @@ export class TrendEngine {
     };
   }
 
-  private async restoreState(): Promise<void> {
-    if (this.savedStateApplied) return;
-    this.savedStateApplied = true;
-    const state = await loadState<{
-      totalProfit?: number;
-      totalTrades?: number;
-      lastOpenPlan?: OpenOrderPlan;
-      tradeLog?: TradeLogEntry[];
-      openOrders?: AsterOrder[];
-    }>(this.stateFile);
-    if (!state) return;
-    if (typeof state.totalProfit === "number") this.totalProfit = state.totalProfit;
-    if (typeof state.totalTrades === "number") this.totalTrades = state.totalTrades;
-    if (state.lastOpenPlan) this.lastOpenPlan = state.lastOpenPlan;
-    if (Array.isArray(state.tradeLog)) this.tradeLog.replace(state.tradeLog);
-    if (Array.isArray(state.openOrders)) this.savedOpenOrders = state.openOrders;
-  }
-
-  private reconcileSavedOpenOrders(): void {
-    if (!this.savedOpenOrders.length) return;
-    const currentIds = new Set(this.openOrders.map((order) => order.orderId));
-    const missing = this.savedOpenOrders.filter((order) => !currentIds.has(order.orderId));
-    if (missing.length) {
-      this.tradeLog.push(
-        "order",
-        `检测到 ${missing.length} 个历史挂单与当前状态不符，将按策略逻辑重新挂单`
-      );
+  private updateSessionVolume(position: PositionSnapshot): void {
+    const price = this.getReferencePrice();
+    if (!this.initializedPosition) {
+      this.prevPositionAmt = position.positionAmt;
+      this.initializedPosition = true;
+      return;
     }
-    this.savedOpenOrders = [];
+    if (price == null) {
+      this.prevPositionAmt = position.positionAmt;
+      return;
+    }
+    const delta = Math.abs(position.positionAmt - this.prevPositionAmt);
+    if (delta > 0) {
+      this.sessionQuoteVolume += delta * price;
+    }
+    this.prevPositionAmt = position.positionAmt;
   }
 
-  private async persistSnapshot(snapshot: TrendEngineSnapshot): Promise<void> {
-    const now = Date.now();
-    if (now - this.lastPersistedAt < 1000) return;
-    this.lastPersistedAt = now;
-    await saveState(this.stateFile, {
-      totalProfit: this.totalProfit,
-      totalTrades: this.totalTrades,
-      lastOpenPlan: this.lastOpenPlan,
-      tradeLog: snapshot.tradeLog,
-      openOrders: snapshot.openOrders.filter((order) => order.symbol === this.config.symbol),
-      position: snapshot.position,
-      timestamp: snapshot.lastUpdated,
-    });
+  private getReferencePrice(): number | null {
+    if (this.tickerSnapshot) {
+      const last = Number(this.tickerSnapshot.lastPrice);
+      if (Number.isFinite(last)) return last;
+    }
+    if (this.depthSnapshot) {
+      const bid = Number(this.depthSnapshot.bids?.[0]?.[0]);
+      const ask = Number(this.depthSnapshot.asks?.[0]?.[0]);
+      if (Number.isFinite(bid) && Number.isFinite(ask)) return (bid + ask) / 2;
+    }
+    if (this.lastPrice != null && Number.isFinite(this.lastPrice)) return this.lastPrice;
+    return null;
   }
+
 }

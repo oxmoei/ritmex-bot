@@ -8,7 +8,7 @@ import type {
 } from "../exchanges/types";
 import { toPrice1Decimal } from "../utils/math";
 import { createTradeLog, type TradeLogEntry } from "../state/trade-log";
-import { loadState, saveState } from "../utils/persistence";
+import { isUnknownOrderError } from "../utils/errors";
 import { getPosition, type PositionSnapshot } from "../utils/strategy";
 import {
   marketClose,
@@ -33,6 +33,7 @@ export interface MakerEngineSnapshot {
   position: PositionSnapshot;
   pnl: number;
   accountUnrealized: number;
+  sessionVolume: number;
   openOrders: AsterOrder[];
   desiredOrders: DesiredOrder[];
   tradeLog: TradeLogEntry[];
@@ -56,21 +57,18 @@ export class MakerEngine {
 
   private readonly tradeLog: ReturnType<typeof createTradeLog>;
   private readonly listeners = new Map<MakerEvent, Set<MakerListener>>();
-  private readonly stateFile: string;
-  private savedStateApplied = false;
-  private lastPersistedAt = 0;
-  private savedOpenOrders: AsterOrder[] = [];
 
   private timer: ReturnType<typeof setInterval> | null = null;
   private processing = false;
   private desiredOrders: DesiredOrder[] = [];
   private accountUnrealized = 0;
+  private sessionQuoteVolume = 0;
+  private prevPositionAmt = 0;
+  private initializedPosition = false;
 
   constructor(private readonly config: MakerConfig, private readonly exchange: ExchangeAdapter) {
     this.tradeLog = createTradeLog(this.config.maxLogEntries);
-    this.stateFile = `maker-${this.config.symbol}.json`;
     this.bootstrap();
-    void this.restoreState();
   }
 
   start(): void {
@@ -113,6 +111,8 @@ export class MakerEngine {
       if (Number.isFinite(totalUnrealized)) {
         this.accountUnrealized = totalUnrealized;
       }
+      const position = getPosition(snapshot, this.config.symbol);
+      this.updateSessionVolume(position);
       this.emitUpdate();
     });
 
@@ -121,7 +121,6 @@ export class MakerEngine {
       this.openOrders = Array.isArray(orders)
         ? orders.filter((order) => order.type !== "MARKET" && order.symbol === this.config.symbol)
         : [];
-      this.reconcileSavedOpenOrders();
       this.emitUpdate();
     });
 
@@ -191,6 +190,7 @@ export class MakerEngine {
       }
 
       this.desiredOrders = desired;
+      this.updateSessionVolume(position);
       await this.syncOrders(desired);
       await this.checkRisk(position, bidPrice, askPrice);
       this.emitUpdate();
@@ -232,7 +232,11 @@ export class MakerEngine {
         await this.exchange.cancelOrder({ symbol: this.config.symbol, orderId: order.orderId });
         this.tradeLog.push("order", `撤销不匹配订单 ${order.side} @ ${order.price} reduceOnly=${order.reduceOnly}`);
       } catch (error) {
-        this.tradeLog.push("error", `撤销订单失败: ${String(error)}`);
+        if (isUnknownOrderError(error)) {
+          this.tradeLog.push("order", "撤销时发现订单已被成交/取消，忽略");
+        } else {
+          this.tradeLog.push("error", `撤销订单失败: ${String(error)}`);
+        }
       }
     }
 
@@ -287,7 +291,11 @@ export class MakerEngine {
           (type, detail) => this.tradeLog.push(type, detail)
         );
       } catch (error) {
-        this.tradeLog.push("error", `止损平仓失败: ${String(error)}`);
+        if (isUnknownOrderError(error)) {
+          this.tradeLog.push("order", "止损平仓时订单已不存在");
+        } else {
+          this.tradeLog.push("error", `止损平仓失败: ${String(error)}`);
+        }
       }
     }
   }
@@ -298,7 +306,11 @@ export class MakerEngine {
       try {
         await this.exchange.cancelOrder({ symbol: this.config.symbol, orderId: order.orderId });
       } catch (error) {
-        this.tradeLog.push("error", `撤销订单失败: ${String(error)}`);
+        if (isUnknownOrderError(error)) {
+          this.tradeLog.push("order", "订单已不存在，撤销跳过");
+        } else {
+          this.tradeLog.push("error", `撤销订单失败: ${String(error)}`);
+        }
       }
     }
   }
@@ -309,7 +321,6 @@ export class MakerEngine {
     if (handlers) {
       handlers.forEach((handler) => handler(snapshot));
     }
-    void this.persistSnapshot(snapshot);
   }
 
   private buildSnapshot(): MakerEngineSnapshot {
@@ -335,6 +346,7 @@ export class MakerEngine {
       position,
       pnl,
       accountUnrealized: this.accountUnrealized,
+      sessionVolume: this.sessionQuoteVolume,
       openOrders: this.openOrders,
       desiredOrders: this.desiredOrders,
       tradeLog: this.tradeLog.all(),
@@ -342,41 +354,33 @@ export class MakerEngine {
     };
   }
 
-  private async restoreState(): Promise<void> {
-    if (this.savedStateApplied) return;
-    this.savedStateApplied = true;
-    const state = await loadState<{
-      tradeLog?: TradeLogEntry[];
-      accountUnrealized?: number;
-      openOrders?: AsterOrder[];
-    }>(this.stateFile);
-    if (!state) return;
-    if (Array.isArray(state.tradeLog)) this.tradeLog.replace(state.tradeLog);
-    if (typeof state.accountUnrealized === "number") this.accountUnrealized = state.accountUnrealized;
-    if (Array.isArray(state.openOrders)) this.savedOpenOrders = state.openOrders;
-  }
-
-  private reconcileSavedOpenOrders(): void {
-    if (!this.savedOpenOrders.length) return;
-    const currentIds = new Set(this.openOrders.map((order) => order.orderId));
-    const missing = this.savedOpenOrders.filter((order) => !currentIds.has(order.orderId));
-    if (missing.length) {
-      this.tradeLog.push("order", `检测到 ${missing.length} 个历史挂单与当前状态不一致，将重新同步`);
+  private updateSessionVolume(position: PositionSnapshot): void {
+    const price = this.getReferencePrice();
+    if (!this.initializedPosition) {
+      this.prevPositionAmt = position.positionAmt;
+      this.initializedPosition = true;
+      return;
     }
-    this.savedOpenOrders = [];
+    if (price == null) {
+      this.prevPositionAmt = position.positionAmt;
+      return;
+    }
+    const delta = Math.abs(position.positionAmt - this.prevPositionAmt);
+    if (delta > 0) {
+      this.sessionQuoteVolume += delta * price;
+    }
+    this.prevPositionAmt = position.positionAmt;
   }
 
-  private async persistSnapshot(snapshot?: MakerEngineSnapshot): Promise<void> {
-    const now = Date.now();
-    if (now - this.lastPersistedAt < 1000) return;
-    this.lastPersistedAt = now;
-    const current = snapshot ?? this.buildSnapshot();
-    await saveState(this.stateFile, {
-      tradeLog: current.tradeLog,
-      accountUnrealized: current.accountUnrealized,
-      openOrders: current.openOrders.filter((order) => order.symbol === this.config.symbol),
-      position: current.position,
-      timestamp: current.lastUpdated,
-    });
+  private getReferencePrice(): number | null {
+    const bid = Number(this.depthSnapshot?.bids?.[0]?.[0]);
+    const ask = Number(this.depthSnapshot?.asks?.[0]?.[0]);
+    if (Number.isFinite(bid) && Number.isFinite(ask)) return (bid + ask) / 2;
+    if (this.tickerSnapshot) {
+      const last = Number(this.tickerSnapshot.lastPrice);
+      if (Number.isFinite(last)) return last;
+    }
+    return null;
   }
+
 }

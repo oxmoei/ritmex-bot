@@ -6,7 +6,6 @@ A Bun-powered trading workstation for Aster perpetual contracts. The project shi
 - **Live data over websockets** with REST fallbacks and automatic re-sync after reconnects.
 - **Trend strategy**: SMA30 crossover entries, automated stop-loss / trailing-stop, and P&L tracking.
 - **Maker strategy**: adaptive bid/ask chasing, risk stops, and target order introspection.
-- **State persistence**: positions, open orders, and logs mirrored under `data/` so restarts continue where you left off.
 - **Extensibility**: exchange gateway, engines, and UI components are modular for new venues or strategies.
 
 ## Requirements
@@ -34,7 +33,7 @@ Additional maker-specific knobs (`MAKER_*`) live in `src/config.ts` and may be o
 ```bash
 bun run index.ts   # or: bun run dev / bun run start
 ```
-Pick a strategy with the arrow keys. Press `Esc` to return to the menu. The dashboard shows live order books, holdings, pending orders, and recent events. All state is mirrored in `data/trend-*.json` and `data/maker-*.json` so the bot can resume after crashes or manual stops.
+Pick a strategy with the arrow keys. Press `Esc` to return to the menu. The dashboard shows live order books, holdings, pending orders, and recent events. 状态完全以交易所数据为准，重新启动时会自动同步账户和挂单。
 
 ## Testing
 ```bash
@@ -50,10 +49,6 @@ Current tests cover the order coordinator utilities and strategy helpers; add un
 - `src/ui/` – Ink components and strategy dashboards
 - `src/utils/` – math helpers, persistence, strategy utilities
 - `tests/` – Vitest suites for critical modules
-
-## Persistence & Recovery Notes
-- Important state is stored in `./data` (git-ignored). Deleting those files forces a fresh start.
-- On reconnect or restart the bot re-pulls account/position/order snapshots and reconciles against local state. Orders on other symbols are ignored so you can trade manually without interference.
 
 ## Troubleshooting
 - **Websocket reconnect loops**: ensure outbound access to `wss://fstream.asterdex.com/ws` and REST endpoints.
