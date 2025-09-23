@@ -6,9 +6,14 @@
 
 使用优惠码获取 30% 手续费折扣：[注册 Aster 获取手续费优惠](https://www.asterdex.com/zh-CN/referral/4665f3)
 
-1. 安装 [Bun](https://bun.com) ≥ 1.2。常见安装方式：
+1. 打开命令行 Terminal，安装 [Bun](https://bun.com) ≥ 1.2。常见安装方式：
    ```bash
    curl -fsSL https://bun.sh/install | bash    # macOS / Linux
+   ```
+
+   或者 windows 安装方式，打开 PowerShell：
+   ```bash
+   powershell -c "irm bun.sh/install.ps1|iex"
    ```
    安装后重新打开终端，使 `bun` 命令生效，然后执行 `bun install` 下载安装依赖。
 2. 复制 `.env.example` 为 `.env` 并填入你的 Aster API Key/Secret，例如：
