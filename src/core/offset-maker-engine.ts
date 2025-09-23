@@ -300,8 +300,8 @@ export class OffsetMakerEngine {
     const absPosition = Math.abs(position.positionAmt);
     if (absPosition < EPS) return false;
 
-    const longExitRequired = position.positionAmt > 0 && (buySum === 0 || buySum * 5 < sellSum);
-    const shortExitRequired = position.positionAmt < 0 && (sellSum === 0 || sellSum * 5 < buySum);
+    const longExitRequired = position.positionAmt > 0 && (buySum === 0 || buySum * 6 < sellSum);
+    const shortExitRequired = position.positionAmt < 0 && (sellSum === 0 || sellSum * 6 < buySum);
 
     if (!longExitRequired && !shortExitRequired) return false;
 
