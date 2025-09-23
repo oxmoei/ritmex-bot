@@ -14,8 +14,10 @@
    - Windows：在开始菜单搜索 “PowerShell” 或 “Windows Terminal” 并打开。
    - 使用 `cd` 切换到项目目录，例如：
      ```bash
-     cd ~/Desktop/ritmex-bot           # macOS / Linux
-     cd C:\Users\用户名\Desktop\ritmex-bot   # Windows
+     # macOS / Linux
+     cd ~/Desktop/ritmex-bot  
+     # Windows         
+     cd C:\Users\用户名\Desktop\ritmex-bot   
      ```
 3. **安装 [Bun](https://bun.com) ≥ 1.2**
    - macOS / Linux：

@@ -78,6 +78,8 @@ export class TrendEngine {
   private sessionQuoteVolume = 0;
   private prevPositionAmt = 0;
   private initializedPosition = false;
+  private cancelAllRequested = false;
+  private readonly pendingCancelOrders = new Set<number>();
 
   private readonly listeners = new Map<TrendEngineEvent, Set<TrendEngineListener>>();
 
@@ -131,6 +133,15 @@ export class TrendEngine {
       this.openOrders = Array.isArray(orders)
         ? orders.filter((order) => order.type !== "MARKET" && order.symbol === this.config.symbol)
         : [];
+      const currentIds = new Set(this.openOrders.map((order) => order.orderId));
+      for (const id of Array.from(this.pendingCancelOrders)) {
+        if (!currentIds.has(id)) {
+          this.pendingCancelOrders.delete(id);
+        }
+      }
+      if (this.openOrders.length === 0 || this.pendingCancelOrders.size === 0) {
+        this.cancelAllRequested = false;
+      }
       this.emitUpdate();
     });
     this.exchange.watchDepth(this.config.symbol, (depth) => {
@@ -210,14 +221,17 @@ export class TrendEngine {
       this.lastPrice = currentPrice;
       return;
     }
-    if (this.openOrders.length > 0) {
+    if (this.openOrders.length > 0 && !this.cancelAllRequested) {
       try {
         await this.exchange.cancelAllOrders({ symbol: this.config.symbol });
+        this.cancelAllRequested = true;
       } catch (err) {
         if (isUnknownOrderError(err)) {
           this.tradeLog.push("order", "撤单时部分订单已不存在，忽略");
+          this.cancelAllRequested = true;
         } else {
           this.tradeLog.push("error", `撤销挂单失败: ${String(err)}`);
+          this.cancelAllRequested = false;
         }
       }
     }
@@ -315,6 +329,7 @@ export class TrendEngine {
           const orderIdList = this.openOrders.map((order) => order.orderId);
           try {
             await this.exchange.cancelOrders({ symbol: this.config.symbol, orderIdList });
+            orderIdList.forEach((id) => this.pendingCancelOrders.add(id));
           } catch (err) {
             if (isUnknownOrderError(err)) {
               this.tradeLog.push("order", "止损前撤单发现订单已不存在");

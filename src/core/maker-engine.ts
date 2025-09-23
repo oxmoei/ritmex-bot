@@ -54,6 +54,7 @@ export class MakerEngine {
   private readonly locks: OrderLockMap = {};
   private readonly timers: OrderTimerMap = {};
   private readonly pending: OrderPendingMap = {};
+  private readonly pendingCancelOrders = new Set<number>();
 
   private readonly tradeLog: ReturnType<typeof createTradeLog>;
   private readonly listeners = new Map<MakerEvent, Set<MakerListener>>();
@@ -121,6 +122,12 @@ export class MakerEngine {
       this.openOrders = Array.isArray(orders)
         ? orders.filter((order) => order.type !== "MARKET" && order.symbol === this.config.symbol)
         : [];
+      const currentIds = new Set(this.openOrders.map((order) => order.orderId));
+      for (const id of Array.from(this.pendingCancelOrders)) {
+        if (!currentIds.has(id)) {
+          this.pendingCancelOrders.delete(id);
+        }
+      }
       this.emitUpdate();
     });
 
@@ -214,6 +221,9 @@ export class MakerEngine {
         continue;
       }
       const reduceOnly = order.reduceOnly === true;
+      if (this.pendingCancelOrders.has(order.orderId)) {
+        continue;
+      }
       const matchedIndex = targets.findIndex((target, index) => {
         if (!unmatched.has(index)) return false;
         if (target.side !== order.side) return false;
@@ -228,14 +238,17 @@ export class MakerEngine {
     }
 
     for (const order of toCancel) {
+      this.pendingCancelOrders.add(order.orderId);
       try {
         await this.exchange.cancelOrder({ symbol: this.config.symbol, orderId: order.orderId });
         this.tradeLog.push("order", `撤销不匹配订单 ${order.side} @ ${order.price} reduceOnly=${order.reduceOnly}`);
       } catch (error) {
         if (isUnknownOrderError(error)) {
           this.tradeLog.push("order", "撤销时发现订单已被成交/取消，忽略");
+          this.pendingCancelOrders.delete(order.orderId);
         } else {
           this.tradeLog.push("error", `撤销订单失败: ${String(error)}`);
+          this.pendingCancelOrders.delete(order.orderId);
         }
       }
     }
@@ -303,13 +316,17 @@ export class MakerEngine {
   private async flushOrders(): Promise<void> {
     if (!this.openOrders.length) return;
     for (const order of this.openOrders) {
+      if (this.pendingCancelOrders.has(order.orderId)) continue;
+      this.pendingCancelOrders.add(order.orderId);
       try {
         await this.exchange.cancelOrder({ symbol: this.config.symbol, orderId: order.orderId });
       } catch (error) {
         if (isUnknownOrderError(error)) {
           this.tradeLog.push("order", "订单已不存在，撤销跳过");
+          this.pendingCancelOrders.delete(order.orderId);
         } else {
           this.tradeLog.push("error", `撤销订单失败: ${String(error)}`);
+          this.pendingCancelOrders.delete(order.orderId);
         }
       }
     }

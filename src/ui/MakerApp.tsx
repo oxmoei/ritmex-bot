@@ -137,9 +137,6 @@ export function MakerApp({ onExit }: MakerAppProps) {
               <Text>
                 浮动盈亏: {formatNumber(snapshot.pnl, 4)} USDT ｜ 账户未实现盈亏: {formatNumber(snapshot.accountUnrealized, 4)} USDT
               </Text>
-              <Text>
-                累计成交量: {formatNumber(snapshot.sessionVolume, 2)} USDT
-              </Text>
             </>
           ) : (
             <Text color="gray">当前无持仓</Text>
@@ -152,6 +149,9 @@ export function MakerApp({ onExit }: MakerAppProps) {
           ) : (
             <Text color="gray">暂无目标挂单</Text>
           )}
+          <Text>
+            累计成交量: {formatNumber(snapshot.sessionVolume, 2)} USDT
+          </Text>
         </Box>
       </Box>
 
