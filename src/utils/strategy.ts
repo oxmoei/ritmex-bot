@@ -10,14 +10,20 @@ export function getPosition(snapshot: AsterAccountSnapshot | null, symbol: strin
   if (!snapshot) {
     return { positionAmt: 0, entryPrice: 0, unrealizedProfit: 0 };
   }
-  const pos = snapshot.positions?.find((p) => p.symbol === symbol);
-  if (!pos) {
+  const positions = snapshot.positions?.filter((p) => p.symbol === symbol) ?? [];
+  if (positions.length === 0) {
     return { positionAmt: 0, entryPrice: 0, unrealizedProfit: 0 };
   }
+  const NON_ZERO_EPS = 1e-8;
+  const withExposure = positions.filter((p) => Math.abs(Number(p.positionAmt)) > NON_ZERO_EPS);
+  const selected =
+    withExposure.find((p) => p.positionSide === "BOTH") ??
+    withExposure.sort((a, b) => Math.abs(Number(b.positionAmt)) - Math.abs(Number(a.positionAmt)))[0] ??
+    positions[0];
   return {
-    positionAmt: Number(pos.positionAmt),
-    entryPrice: Number(pos.entryPrice),
-    unrealizedProfit: Number(pos.unrealizedProfit),
+    positionAmt: Number(selected.positionAmt) || 0,
+    entryPrice: Number(selected.entryPrice) || 0,
+    unrealizedProfit: Number(selected.unrealizedProfit) || 0,
   };
 }
 
