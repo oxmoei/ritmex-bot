@@ -6,17 +6,33 @@
 
 使用优惠码获取 30% 手续费折扣：[注册 Aster 获取手续费优惠](https://www.asterdex.com/zh-CN/referral/4665f3)
 
-1. 打开命令行 Terminal，安装 [Bun](https://bun.com) ≥ 1.2。常见安装方式：
+1. **下载代码**
+   - 如果会使用 Git：`git clone https://github.com/discountry/ritmex-bot.git`
+   - 如果不会使用 Git：点击仓库页面的 `Code` → `Download ZIP`，将压缩包解压到如 `桌面/ritmex-bot` 的目录。
+2. **打开命令行并进入项目目录**
+   - macOS：通过 Spotlight (`⌘ + 空格`) 搜索 “Terminal” 并打开。
+   - Windows：在开始菜单搜索 “PowerShell” 或 “Windows Terminal” 并打开。
+   - 使用 `cd` 切换到项目目录，例如：
+     ```bash
+     cd ~/Desktop/ritmex-bot           # macOS / Linux
+     cd C:\Users\用户名\Desktop\ritmex-bot   # Windows
+     ```
+3. **安装 [Bun](https://bun.com) ≥ 1.2**
+   - macOS / Linux：
+     ```bash
+     curl -fsSL https://bun.sh/install | bash
+     ```
+   - Windows（PowerShell）：
+     ```powershell
+     powershell -c "irm bun.sh/install.ps1 | iex"
+     ```
+   安装完成后关闭并重新打开终端，运行 `bun -v` 确认命令可用。
+4. **安装依赖**
    ```bash
-   curl -fsSL https://bun.sh/install | bash    # macOS / Linux
+   bun install
    ```
-
-   或者 windows 安装方式，打开 PowerShell：
-   ```bash
-   powershell -c "irm bun.sh/install.ps1|iex"
-   ```
-   安装后重新打开终端，使 `bun` 命令生效，然后执行 `bun install` 下载安装依赖。
-2. 复制 `.env.example` 为 `.env` 并填入你的 Aster API Key/Secret，例如：
+5. **配置环境变量**
+   复制 `.env.example` 为 `.env` 并填入你的 Aster API Key/Secret：
    ```bash
    cp .env.example .env
    ```
@@ -28,12 +44,13 @@
    - `LOSS_LIMIT`：单笔允许的最大亏损（USDT），触发即强制平仓。
    - `TRAILING_PROFIT` / `TRAILING_CALLBACK_RATE`：趋势策略的动态止盈触发值与回撤百分比。
    - `MAKER_*` 参数：做市策略追价阈值、报价偏移、刷新频率等，可按流动性需求调节。
-3. 运行机器人：
+6. **运行机器人**
    ```bash
    bun run index.ts
    ```
    在终端中按 ↑/↓ 选择 “趋势策略” 或 “做市策略”，回车启动。按 `Esc` 可返回选择菜单，`Ctrl+C` 退出。
-4. 仿真/测试环境建议先设置极小仓位；真实资金请确保 API 仅开启所需权限，并先在低金额下验证策略行为。
+7. **风险提示**
+   建议先在小额或仿真环境中测试策略；真实资金操作前请确认 API 仅开启必要权限，并逐步验证配置。
 
 A Bun-powered trading workstation for Aster perpetual contracts. The project ships two production strategies—an SMA30 trend follower and a dual-sided maker—that share a modular gateway, UI, and persistence layer. Everything runs in the terminal via Ink, with live websocket refresh and automatic recovery from restarts or network failures.
 
