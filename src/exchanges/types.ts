@@ -37,6 +37,11 @@ export interface AsterAccountPosition {
   leverage?: string;
   isolated?: boolean;
   maxNotional?: string;
+  marginType?: string;
+  isolatedMargin?: string;
+  isAutoAddMargin?: string;
+  liquidationPrice?: string;
+  markPrice?: string;
 }
 
 export interface AsterAccountAsset {

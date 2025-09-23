@@ -81,6 +81,9 @@ export class TrendEngine {
   private cancelAllRequested = false;
   private readonly pendingCancelOrders = new Set<number>();
 
+  private ordersSnapshotReady = false;
+  private startupLogged = false;
+
   private readonly listeners = new Map<TrendEngineEvent, Set<TrendEngineListener>>();
 
   constructor(private readonly config: TradingConfig, private readonly exchange: ExchangeAdapter) {
@@ -142,6 +145,7 @@ export class TrendEngine {
       if (this.openOrders.length === 0 || this.pendingCancelOrders.size === 0) {
         this.cancelAllRequested = false;
       }
+      this.ordersSnapshotReady = true;
       this.emitUpdate();
     });
     this.exchange.watchDepth(this.config.symbol, (depth) => {
@@ -182,10 +186,15 @@ export class TrendEngine {
     if (this.processing) return;
     this.processing = true;
     try {
+      if (!this.ordersSnapshotReady) {
+        this.emitUpdate();
+        return;
+      }
       if (!this.isReady()) {
         this.emitUpdate();
         return;
       }
+      this.logStartupState();
       const sma30 = getSMA(this.klineSnapshot, 30);
       if (sma30 == null) {
         return;
@@ -214,6 +223,22 @@ export class TrendEngine {
     } finally {
       this.processing = false;
     }
+  }
+
+  private logStartupState(): void {
+    if (this.startupLogged) return;
+    const position = getPosition(this.accountSnapshot, this.config.symbol);
+    const hasPosition = Math.abs(position.positionAmt) > 1e-5;
+    if (hasPosition) {
+      this.tradeLog.push(
+        "info",
+        `检测到已有持仓: ${position.positionAmt > 0 ? "多" : "空"} ${Math.abs(position.positionAmt).toFixed(4)} @ ${position.entryPrice.toFixed(2)}`
+      );
+    }
+    if (this.openOrders.length > 0) {
+      this.tradeLog.push("info", `检测到已有挂单 ${this.openOrders.length} 笔，将按策略规则接管`);
+    }
+    this.startupLogged = true;
   }
 
   private async handleOpenPosition(currentPrice: number, currentSma: number): Promise<void> {

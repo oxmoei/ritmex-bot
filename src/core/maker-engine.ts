@@ -66,6 +66,8 @@ export class MakerEngine {
   private sessionQuoteVolume = 0;
   private prevPositionAmt = 0;
   private initializedPosition = false;
+  private initialOrderSnapshotReady = false;
+  private initialOrderResetDone = false;
 
   constructor(private readonly config: MakerConfig, private readonly exchange: ExchangeAdapter) {
     this.tradeLog = createTradeLog(this.config.maxLogEntries);
@@ -128,6 +130,7 @@ export class MakerEngine {
           this.pendingCancelOrders.delete(id);
         }
       }
+      this.initialOrderSnapshotReady = true;
       this.emitUpdate();
     });
 
@@ -170,6 +173,10 @@ export class MakerEngine {
         this.emitUpdate();
         return;
       }
+      if (!(await this.ensureStartupOrderReset())) {
+        this.emitUpdate();
+        return;
+      }
 
       const depth = this.depthSnapshot!;
       const bidLevel = depth.bids?.[0];
@@ -206,6 +213,31 @@ export class MakerEngine {
       this.emitUpdate();
     } finally {
       this.processing = false;
+    }
+  }
+
+  private async ensureStartupOrderReset(): Promise<boolean> {
+    if (this.initialOrderResetDone) return true;
+    if (!this.initialOrderSnapshotReady) return false;
+    if (!this.openOrders.length) {
+      this.initialOrderResetDone = true;
+      return true;
+    }
+    try {
+      await this.exchange.cancelAllOrders({ symbol: this.config.symbol });
+      this.pendingCancelOrders.clear();
+      unlockOperating(this.locks, this.timers, this.pending, "LIMIT");
+      this.tradeLog.push("order", "启动时清理历史挂单");
+      this.initialOrderResetDone = true;
+      return true;
+    } catch (error) {
+      if (isUnknownOrderError(error)) {
+        this.tradeLog.push("order", "历史挂单已消失，跳过启动清理");
+        this.initialOrderResetDone = true;
+        return true;
+      }
+      this.tradeLog.push("error", `启动撤单失败: ${String(error)}`);
+      return false;
     }
   }
 

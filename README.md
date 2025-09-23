@@ -63,7 +63,7 @@
 7. **风险提示**
    建议先在小额或仿真环境中测试策略；真实资金操作前请确认 API 仅开启必要权限，并逐步验证配置。
 
-A Bun-powered trading workstation for Aster perpetual contracts. The project ships two production strategies—an SMA30 trend follower and a dual-sided maker—that share a modular gateway, UI, and persistence layer. Everything runs in the terminal via Ink, with live websocket refresh and automatic recovery from restarts or network failures.
+A Bun-powered trading workstation for Aster perpetual contracts. The project ships two production strategies—an SMA30 trend follower and a dual-sided maker—that share a modular gateway, UI, and runtime state derived entirely from the exchange. Everything runs in the terminal via Ink, with live websocket refresh and automatic recovery from restarts or network failures.
 
 ## Features
 - **Live data over websockets** with REST fallbacks and automatic re-sync after reconnects.
@@ -110,7 +110,7 @@ Current tests cover the order coordinator utilities and strategy helpers; add un
 - `src/core/` – trend & maker engines plus order coordination
 - `src/exchanges/` – Aster REST/WS gateway and adapters
 - `src/ui/` – Ink components and strategy dashboards
-- `src/utils/` – math helpers, persistence, strategy utilities
+- `src/utils/` – math helpers and strategy utilities
 - `tests/` – Vitest suites for critical modules
 
 ## Troubleshooting

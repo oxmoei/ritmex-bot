@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { setInterval, clearInterval, setTimeout, clearTimeout } from "timers";
 import type {
+  AsterAccountPosition,
   AsterAccountSnapshot,
   AsterDepth,
   AsterKline,
@@ -21,6 +22,7 @@ const DEFAULT_KLINE_LIMIT = 120;
 const KLINE_REFRESH_INTERVAL_MS = 60_000;
 const LISTEN_KEY_KEEPALIVE_MS = 30 * 60 * 1000;
 const RECONNECT_DELAY_MS = 2000;
+const POSITION_SYNC_INTERVAL_MS = 5000;
 
 function requireEnv(value: string | undefined, key: string): string {
   if (!value) {
@@ -164,8 +166,44 @@ function toOrderFromEvent(event: any): AsterOrder {
   };
 }
 
+function toPositionFromRisk(raw: any): AsterAccountPosition {
+  const positionSide = String(raw.positionSide ?? raw.ps ?? "BOTH").toUpperCase() as PositionSide;
+  return {
+    symbol: raw.symbol ?? raw.s ?? "",
+    positionAmt: raw.positionAmt ?? raw.pa ?? "0",
+    entryPrice: raw.entryPrice ?? raw.ep ?? "0",
+    unrealizedProfit: raw.unRealizedProfit ?? raw.unrealizedProfit ?? raw.up ?? "0",
+    positionSide,
+    updateTime: raw.updateTime ?? Date.now(),
+    initialMargin: raw.initialMargin ?? raw.positionInitialMargin,
+    maintMargin: raw.maintMargin,
+    positionInitialMargin: raw.positionInitialMargin,
+    openOrderInitialMargin: raw.openOrderInitialMargin,
+    leverage: raw.leverage,
+    isolated: typeof raw.isolated === "boolean" ? raw.isolated : undefined,
+    maxNotional: raw.maxNotionalValue ?? raw.maxNotional,
+    marginType: raw.marginType,
+    isolatedMargin: raw.isolatedMargin,
+    isAutoAddMargin: raw.isAutoAddMargin,
+    liquidationPrice: raw.liquidationPrice,
+    markPrice: raw.markPrice,
+  };
+}
+
 function deepCloneAccount(snapshot: AsterAccountSnapshot | null): AsterAccountSnapshot | null {
   return snapshot ? JSON.parse(JSON.stringify(snapshot)) : null;
+}
+
+function sumUnrealizedProfit(positions: AsterAccountPosition[]): string {
+  const total = positions.reduce((acc, position) => acc + Number(position.unrealizedProfit ?? 0), 0);
+  return total.toFixed(8);
+}
+
+function clonePositions(positions: AsterAccountPosition[]): AsterAccountPosition[] {
+  return positions.map((position) => ({
+    ...position,
+    updateTime: position.updateTime ?? Date.now(),
+  }));
 }
 
 class SimpleEvent<T> {
@@ -216,6 +254,13 @@ export class AsterRestClient {
     if (symbol) params.symbol = symbol;
     const raw = await this.signedRequest<any[]>({ path: "/fapi/v1/openOrders", method: "GET", params });
     return raw.map(toOrderFromRest);
+  }
+
+  async getPositions(symbol?: string): Promise<AsterAccountPosition[]> {
+    const params: Record<string, unknown> = {};
+    if (symbol) params.symbol = symbol.toUpperCase();
+    const raw = await this.signedRequest<any[]>({ path: "/fapi/v2/positionRisk", method: "GET", params });
+    return raw.map(toPositionFromRisk);
   }
 
   async createOrder(params: CreateOrderParams): Promise<AsterOrder> {
@@ -674,6 +719,8 @@ export class AsterGateway {
 
   private accountSnapshot: AsterAccountSnapshot | null = null;
   private readonly openOrders = new Map<number, AsterOrder>();
+  private positionSyncTimer: ReturnType<typeof setInterval> | null = null;
+  private positionSyncInFlight = false;
 
   private readonly accountEvent = new SimpleEvent<AsterAccountSnapshot>();
   private readonly ordersEvent = new SimpleEvent<AsterOrder[]>();
@@ -702,6 +749,11 @@ export class AsterGateway {
       const order = toOrderFromEvent(event.payload);
       mergeOrderSnapshot(this.openOrders, order);
       this.ordersEvent.emit(Array.from(this.openOrders.values()));
+      const execType = typeof event.payload?.x === "string" ? event.payload.x.toUpperCase() : "";
+      const status = typeof event.payload?.X === "string" ? event.payload.X.toUpperCase() : "";
+      if (execType === "TRADE" || status === "FILLED" || status === "PARTIALLY_FILLED") {
+        void this.refreshPositions();
+      }
     });
     this.userStream.onConnect(() => {
       void this.refreshSnapshots();
@@ -715,6 +767,7 @@ export class AsterGateway {
       await this.refreshSnapshots();
       this.initialized = true;
       await this.userStream.start();
+      this.startPositionSync();
     })().catch((error) => {
       this.initializing = null;
       throw error;
@@ -840,8 +893,24 @@ export class AsterGateway {
   private async refreshSnapshots(): Promise<void> {
     try {
       const account = await this.rest.getAccount();
-      this.accountSnapshot = account;
-      this.accountEvent.emit(account);
+      let positions = account.positions ?? [];
+      try {
+        const latestPositions = await this.rest.getPositions();
+        if (Array.isArray(latestPositions) && latestPositions.length) {
+          positions = latestPositions;
+        }
+      } catch (positionError) {
+        console.error("[AsterGateway] 刷新持仓失败", positionError);
+      }
+      const normalizedPositions = clonePositions(positions);
+      const snapshot: AsterAccountSnapshot = {
+        ...account,
+        positions: normalizedPositions,
+        totalUnrealizedProfit: sumUnrealizedProfit(normalizedPositions),
+        updateTime: Date.now(),
+      };
+      this.accountSnapshot = snapshot;
+      this.accountEvent.emit(snapshot);
     } catch (error) {
       console.error("[AsterGateway] 刷新账户信息失败", error);
     }
@@ -852,6 +921,52 @@ export class AsterGateway {
       this.ordersEvent.emit(Array.from(this.openOrders.values()));
     } catch (error) {
       console.error("[AsterGateway] 刷新挂单失败", error);
+    }
+  }
+
+  private startPositionSync(): void {
+    if (this.positionSyncTimer) return;
+    const tick = () => {
+      void this.refreshPositions();
+    };
+    void this.refreshPositions();
+    this.positionSyncTimer = setInterval(tick, POSITION_SYNC_INTERVAL_MS);
+  }
+
+  private async refreshPositions(): Promise<void> {
+    if (this.positionSyncInFlight) return;
+    this.positionSyncInFlight = true;
+    try {
+      const positions = await this.rest.getPositions();
+      if (!Array.isArray(positions)) return;
+      const normalizedPositions = clonePositions(positions);
+      if (!this.accountSnapshot) {
+        const snapshot: AsterAccountSnapshot = {
+          canTrade: true,
+          canDeposit: true,
+          canWithdraw: true,
+          updateTime: Date.now(),
+          totalWalletBalance: "0",
+          totalUnrealizedProfit: sumUnrealizedProfit(normalizedPositions),
+          positions: normalizedPositions,
+          assets: [],
+        };
+        this.accountSnapshot = snapshot;
+        this.accountEvent.emit(snapshot);
+        return;
+      }
+      const nextSnapshot: AsterAccountSnapshot = {
+        ...this.accountSnapshot,
+        positions: normalizedPositions,
+        totalUnrealizedProfit: sumUnrealizedProfit(normalizedPositions),
+        updateTime: Date.now(),
+      };
+      this.accountSnapshot = nextSnapshot;
+      this.accountEvent.emit(nextSnapshot);
+    } catch (error) {
+      console.error("[AsterGateway] 同步持仓失败", error);
+    } finally {
+      this.positionSyncInFlight = false;
     }
   }
 
