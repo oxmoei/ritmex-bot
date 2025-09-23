@@ -27,8 +27,11 @@
      powershell -c "irm bun.sh/install.ps1 | iex"
      ```
    安装完成后关闭并重新打开终端，运行 `bun -v` 确认命令可用。
+
    如果上述命令无法完成安装，请尝试 [bun官网](https://bun.com/get) 提供的各种安装方式。
+
    Windows 用户如果无法正常安装，可以尝试先[安装 nodejs](https://nodejs.org/en/download)
+   
    然后使用 `npm` 安装 `bun`：
    ```bash
       npm install -g bun
