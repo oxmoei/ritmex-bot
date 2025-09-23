@@ -3,6 +3,9 @@
 一个基于 Bun 的 Aster 永续合约终端机器人，内置趋势跟随（SMA30）与做市策略，使用 websocket 实时行情，命令行界面由 Ink 驱动，可在断线后自动恢复运行。
 
 ## 快速上手
+
+使用优惠码获取 30% 手续费折扣：[注册 Aster 获取手续费优惠](https://www.asterdex.com/zh-CN/referral/4665f3)
+
 1. 安装 [Bun](https://bun.com) ≥ 1.2。常见安装方式：
    ```bash
    curl -fsSL https://bun.sh/install | bash    # macOS / Linux
