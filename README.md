@@ -31,10 +31,10 @@
    如果上述命令无法完成安装，请尝试 [bun官网](https://bun.com/get) 提供的各种安装方式。
 
    Windows 用户如果无法正常安装，可以尝试先[安装 nodejs](https://nodejs.org/en/download)
-   
+
    然后使用 `npm` 安装 `bun`：
    ```bash
-      npm install -g bun
+   npm install -g bun
    ```
 4. **安装依赖**
    ```bash
