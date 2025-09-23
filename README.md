@@ -4,7 +4,13 @@
    ```bash
    cp .env.example .env
    ```
-   然后修改 `.env` 中的配置项（交易对、下单量、风控等）。
+   然后根据需要修改 `.env` 中的配置项：
+   - `ASTER_API_KEY` / `ASTER_API_SECRET`：Aster 交易所提供的 API 凭证，必须具备合约交易权限。
+   - `TRADE_SYMBOL`：策略运行的交易对（默认 `BTCUSDT`），需与 API 权限范围一致。
+   - `TRADE_AMOUNT`：单次下单数量（合约张数折算后单位为标的货币，例如 BTC）。
+   - `LOSS_LIMIT`：单笔允许的最大亏损（USDT），触发即强制平仓。
+   - `TRAILING_PROFIT` / `TRAILING_CALLBACK_RATE`：趋势策略的动态止盈触发值与回撤百分比。
+   - `MAKER_*` 参数：做市策略追价阈值、报价偏移、刷新频率等，可按流动性需求调节。
 3. 运行机器人：
    ```bash
    bun run index.ts
