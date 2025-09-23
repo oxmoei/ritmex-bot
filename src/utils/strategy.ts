@@ -21,9 +21,9 @@ export function getPosition(snapshot: AsterAccountSnapshot | null, symbol: strin
     withExposure.sort((a, b) => Math.abs(Number(b.positionAmt)) - Math.abs(Number(a.positionAmt)))[0] ??
     positions[0];
   return {
-    positionAmt: Number(selected.positionAmt) || 0,
-    entryPrice: Number(selected.entryPrice) || 0,
-    unrealizedProfit: Number(selected.unrealizedProfit) || 0,
+    positionAmt: Number(selected?.positionAmt) || 0,
+    entryPrice: Number(selected?.entryPrice) || 0,
+    unrealizedProfit: Number(selected?.unrealizedProfit) || 0,
   };
 }
 

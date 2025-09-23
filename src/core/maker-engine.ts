@@ -227,6 +227,8 @@ export class MakerEngine {
       await this.exchange.cancelAllOrders({ symbol: this.config.symbol });
       this.pendingCancelOrders.clear();
       unlockOperating(this.locks, this.timers, this.pending, "LIMIT");
+      this.openOrders = [];
+      this.emitUpdate();
       this.tradeLog.push("order", "启动时清理历史挂单");
       this.initialOrderResetDone = true;
       return true;
@@ -234,6 +236,8 @@ export class MakerEngine {
       if (isUnknownOrderError(error)) {
         this.tradeLog.push("order", "历史挂单已消失，跳过启动清理");
         this.initialOrderResetDone = true;
+        this.openOrders = [];
+        this.emitUpdate();
         return true;
       }
       this.tradeLog.push("error", `启动撤单失败: ${String(error)}`);
