@@ -214,7 +214,11 @@ export class TrendEngine {
       try {
         await this.exchange.cancelAllOrders({ symbol: this.config.symbol });
       } catch (err) {
-        this.tradeLog.push("error", `撤销挂单失败: ${String(err)}`);
+        if (isUnknownOrderError(err)) {
+          this.tradeLog.push("order", "撤单时部分订单已不存在，忽略");
+        } else {
+          this.tradeLog.push("error", `撤销挂单失败: ${String(err)}`);
+        }
       }
     }
     if (this.lastPrice > currentSma && currentPrice < currentSma) {
@@ -327,10 +331,10 @@ export class TrendEngine {
           this.timers,
           this.pending,
           direction === "long" ? "SELL" : "BUY",
-          this.config.tradeAmount,
+          Math.abs(position.positionAmt),
           (type, detail) => this.tradeLog.push(type, detail)
         );
-      this.tradeLog.push("close", `止损平仓: ${direction === "long" ? "SELL" : "BUY"}`);
+        this.tradeLog.push("close", `止损平仓: ${direction === "long" ? "SELL" : "BUY"}`);
       } catch (err) {
         if (isUnknownOrderError(err)) {
           this.tradeLog.push("order", "止损平仓时目标订单已不存在");
@@ -350,6 +354,8 @@ export class TrendEngine {
     lastPrice: number
   ): Promise<void> {
     try {
+      const position = getPosition(this.accountSnapshot, this.config.symbol);
+      const quantity = Math.abs(position.positionAmt) || this.config.tradeAmount;
       await placeStopLossOrder(
         this.exchange,
         this.config.symbol,
@@ -359,7 +365,7 @@ export class TrendEngine {
         this.pending,
         side,
         stopPrice,
-        this.config.tradeAmount,
+        quantity,
         lastPrice,
         (type, detail) => this.tradeLog.push(type, detail)
       );
