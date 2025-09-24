@@ -13,6 +13,7 @@ main() {
   require_unix
   ensure_repo
   cd "$PROJECT_DIR"
+  referral_notice
   ensure_bun
   install_deps
   prompt_env
@@ -85,6 +86,15 @@ ensure_repo() {
   PROJECT_DIR="$TARGET_DIR"
 }
 
+referral_notice() {
+  echo
+  echo "开始之前：请打开以下链接连接钱包加入战队，享受 30% 手续费优惠："
+  echo "https://www.asterdex.com/zh-CN/referral/4665f3"
+  echo
+  # Wait for user to press Enter on a real TTY; don't fail if no TTY
+  read -r -p "打开链接后按下回车继续..." _ < /dev/tty || true
+}
+
 install_deps() {
   echo "Installing dependencies with Bun..."
   bun install
@@ -93,18 +103,26 @@ install_deps() {
 prompt_env() {
   echo
   echo "Please enter your AsterDex API credentials."
-  read -r -p "ASTER_API_KEY: " ASTER_API_KEY
-  read -r -s -p "ASTER_API_SECRET (input hidden): " ASTER_API_SECRET
-  echo
-  read -r -p "TRADE_SYMBOL (default BTCUSDT): " TRADE_SYMBOL || true
+  while true; do
+    read -r -p "ASTER_API_KEY: " ASTER_API_KEY < /dev/tty
+    [ -n "${ASTER_API_KEY:-}" ] && break
+    echo "ASTER_API_KEY cannot be empty. Please try again."
+  done
+  while true; do
+    read -r -s -p "ASTER_API_SECRET (input hidden): " ASTER_API_SECRET < /dev/tty
+    echo
+    [ -n "${ASTER_API_SECRET:-}" ] && break
+    echo "ASTER_API_SECRET cannot be empty. Please try again."
+  done
+  read -r -p "TRADE_SYMBOL (default BTCUSDT): " TRADE_SYMBOL < /dev/tty || true
   TRADE_SYMBOL=${TRADE_SYMBOL:-BTCUSDT}
 
   # Optional trading parameters
-  read -r -p "TRADE_AMOUNT (default 0.001): " TRADE_AMOUNT || true
+  read -r -p "TRADE_AMOUNT (default 0.001): " TRADE_AMOUNT < /dev/tty || true
   TRADE_AMOUNT=${TRADE_AMOUNT:-0.001}
-  read -r -p "LOSS_LIMIT (default 0.03): " LOSS_LIMIT || true
+  read -r -p "LOSS_LIMIT (default 0.03): " LOSS_LIMIT < /dev/tty || true
   LOSS_LIMIT=${LOSS_LIMIT:-0.03}
-  read -r -p "KLINE_INTERVAL (default 1m): " KLINE_INTERVAL || true
+  read -r -p "KLINE_INTERVAL (default 1m): " KLINE_INTERVAL < /dev/tty || true
   KLINE_INTERVAL=${KLINE_INTERVAL:-1m}
 }
 
