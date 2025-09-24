@@ -6,6 +6,10 @@
 
 使用优惠码获取 30% 手续费折扣：[注册 Aster 获取手续费优惠](https://www.asterdex.com/zh-CN/referral/4665f3)
 
+如果你完全不懂代码，可以查看 >> [小白教程](simple-readme.md) 了解使用方法。<<
+
+遇到Bug，返回问题，请到 [Telegram群组](https://t.me/+4fdo0quY87o4Mjhh)
+
 1. **下载代码**
    - 如果会使用 Git：`git clone https://github.com/discountry/ritmex-bot.git`
    - 如果不会使用 Git：点击仓库页面的 `Code` → `Download ZIP`，将压缩包解压到如 `桌面/ritmex-bot` 的目录。
@@ -49,7 +53,7 @@
    ```
    然后根据需要修改 `.env` 中的配置项：
    - API KEY 获取地址 [https://www.asterdex.com/zh-CN/api-management](https://www.asterdex.com/zh-CN/api-management)
-   - `ASTER_API_KEY` / `ASTER_API_SECRET`：Aster 交易所提供的 API 凭证，必须具备合约交易权限。
+   - `ASTER_API_KEY` / `ASTER_API_SECRET`：Aster 交易所提供的 API 凭证。
    - `TRADE_SYMBOL`：策略运行的交易对（默认 `BTCUSDT`），需与 API 权限范围一致。
    - `TRADE_AMOUNT`：单次下单数量（合约张数折算后单位为标的货币，例如 BTC）。
    - `LOSS_LIMIT`：单笔允许的最大亏损（USDT），触发即强制平仓。
