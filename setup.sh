@@ -73,7 +73,7 @@ ensure_repo() {
   local TARGET_DIR="${RITMEX_DIR:-ritmex-bot}"
 
   if [ -d "$TARGET_DIR" ] && [ -f "$TARGET_DIR/package.json" ]; then
-    PROJECT_DIR="$TARGET_DIR"
+    PROJECT_DIR="$(cd "$TARGET_DIR" && pwd)"
     echo "✔ Project directory found: $PROJECT_DIR"
     return
   fi
@@ -88,7 +88,7 @@ ensure_repo() {
     tar -xzf /tmp/ritmex-bot.tar.gz --strip-components=1 -C "$TARGET_DIR"
     rm -f /tmp/ritmex-bot.tar.gz
   fi
-  PROJECT_DIR="$TARGET_DIR"
+  PROJECT_DIR="$(cd "$TARGET_DIR" && pwd)"
 }
 
 referral_notice() {
@@ -107,27 +107,22 @@ install_deps() {
 
 prompt_env() {
   echo
-  echo "Please enter your AsterDex API credentials."
+  echo "请输入 AsterDex API 凭证。"
   while true; do
-    read -r -p "ASTER_API_KEY: " ASTER_API_KEY < /dev/tty
+    read -r -p "请输入 ASTER_API_KEY： " ASTER_API_KEY < /dev/tty
     [ -n "${ASTER_API_KEY:-}" ] && break
-    echo "ASTER_API_KEY cannot be empty. Please try again."
+    echo "ASTER_API_KEY 不能为空，请重新输入。"
   done
   while true; do
-    read -r -p "ASTER_API_SECRET: " ASTER_API_SECRET < /dev/tty
+    read -r -p "请输入 ASTER_API_SECRET： " ASTER_API_SECRET < /dev/tty
     [ -n "${ASTER_API_SECRET:-}" ] && break
-    echo "ASTER_API_SECRET cannot be empty. Please try again."
+    echo "ASTER_API_SECRET 不能为空，请重新输入。"
   done
-  read -r -p "TRADE_SYMBOL (default BTCUSDT): " TRADE_SYMBOL < /dev/tty || true
-  TRADE_SYMBOL=${TRADE_SYMBOL:-BTCUSDT}
-
-  # Optional trading parameters
-  read -r -p "TRADE_AMOUNT (default 0.001): " TRADE_AMOUNT < /dev/tty || true
-  TRADE_AMOUNT=${TRADE_AMOUNT:-0.001}
-  read -r -p "LOSS_LIMIT (default 0.03): " LOSS_LIMIT < /dev/tty || true
-  LOSS_LIMIT=${LOSS_LIMIT:-0.03}
-  read -r -p "KLINE_INTERVAL (default 1m): " KLINE_INTERVAL < /dev/tty || true
-  KLINE_INTERVAL=${KLINE_INTERVAL:-1m}
+  # 其余参数使用默认值（可在 .env 中自行修改）
+  TRADE_SYMBOL="BTCUSDT"
+  TRADE_AMOUNT="0.001"
+  LOSS_LIMIT="0.03"
+  KLINE_INTERVAL="1m"
 }
 
 write_env() {
