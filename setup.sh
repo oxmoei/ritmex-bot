@@ -107,6 +107,8 @@ install_deps() {
 prompt_env() {
   echo
   echo "请输入 AsterDex API 凭证。"
+  echo "如果你还没有 API，请打开以下链接创建后再继续："
+  echo "https://www.asterdex.com/zh-CN/api-management"
   while true; do
     read -r -p "请输入 ASTER_API_KEY： " ASTER_API_KEY < /dev/tty
     [ -n "${ASTER_API_KEY:-}" ] && break
