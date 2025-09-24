@@ -7,7 +7,7 @@ set -euo pipefail
 # - Installs dependencies
 # - Prompts for API credentials
 # - Generates .env
-# - Starts the bot
+# - Prepares to start the bot (does not auto-run)
 
 main() {
   require_unix
@@ -19,9 +19,14 @@ main() {
   prompt_env
   write_env
   echo
-  echo "✅ Setup complete. Starting ritmex-bot..."
+  # Ensure we end inside the project directory
+  cd "$PROJECT_DIR"
+  echo "✅ 安装完成！已进入项目目录：$PROJECT_DIR"
+  echo "请在终端中输入以下命令启动："
   echo
-  start_bot
+  echo "  bun start"
+  echo
+  echo "提示：启动前可检查或编辑当前目录下的 .env 文件。"
 }
 
 require_unix() {
@@ -147,12 +152,6 @@ KLINE_INTERVAL=${KLINE_INTERVAL}
 # MAKER_PRICE_TICK=0.1
 EOF
   echo "✔ .env created at $(pwd)/${env_file}"
-}
-
-start_bot() {
-  # Bun auto-loads .env; no need to run dotenv explicitly
-  # Ensure Bun has a TTY for interactive menu input
-  exec bun index.ts < /dev/tty
 }
 
 main "$@"

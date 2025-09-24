@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Box, Text, useInput, useStdin } from "ink";
+import { Box, Text, useInput } from "ink";
 import { makerConfig } from "../config";
 import { AsterExchangeAdapter } from "../exchanges/aster-adapter";
 import { MakerEngine, type MakerEngineSnapshot } from "../core/maker-engine";
@@ -10,13 +10,9 @@ interface MakerAppProps {
   onExit: () => void;
 }
 
-function useInputSupported() {
-  const { isRawModeSupported } = useStdin();
-  return Boolean(isRawModeSupported);
-}
+const inputSupported = Boolean(process.stdin && (process.stdin as any).isTTY);
 
 export function MakerApp({ onExit }: MakerAppProps) {
-  const inputSupported = useInputSupported();
   const [snapshot, setSnapshot] = useState<MakerEngineSnapshot | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const engineRef = useRef<MakerEngine | null>(null);
