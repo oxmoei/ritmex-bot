@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, useStdin } from "ink";
 import { TrendApp } from "./TrendApp";
 import { MakerApp } from "./MakerApp";
 import { OffsetMakerApp } from "./OffsetMakerApp";
@@ -32,9 +32,15 @@ const STRATEGIES: StrategyOption[] = [
   },
 ];
 
-const inputSupported = Boolean(process.stdin && (process.stdin as any).isTTY);
+// Prefer Ink's stdin detection to avoid false negatives when spawned by shells
+// that don't propagate process.stdin TTY flags correctly.
+function useInputSupported() {
+  const { isRawModeSupported } = useStdin();
+  return Boolean(isRawModeSupported);
+}
 
 export function App() {
+  const inputSupported = useInputSupported();
   const [cursor, setCursor] = useState(0);
   const [selected, setSelected] = useState<StrategyOption | null>(null);
 

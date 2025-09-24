@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, useStdin } from "ink";
 import { tradingConfig } from "../config";
 import { AsterExchangeAdapter } from "../exchanges/aster-adapter";
 import { TrendEngine, type TrendEngineSnapshot } from "../core/trend-engine";
@@ -12,9 +12,13 @@ interface TrendAppProps {
   onExit: () => void;
 }
 
-const inputSupported = Boolean(process.stdin && (process.stdin as any).isTTY);
+function useInputSupported() {
+  const { isRawModeSupported } = useStdin();
+  return Boolean(isRawModeSupported);
+}
 
 export function TrendApp({ onExit }: TrendAppProps) {
+  const inputSupported = useInputSupported();
   const [snapshot, setSnapshot] = useState<TrendEngineSnapshot | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const engineRef = useRef<TrendEngine | null>(null);
