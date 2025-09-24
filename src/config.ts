@@ -10,6 +10,8 @@ export interface TradingConfig {
   maxLogEntries: number;
   klineInterval: string;
   maxCloseSlippagePct: number;
+  priceTick: number; // price tick size, e.g. 0.1 for BTCUSDT
+  qtyStep: number;   // quantity step size, e.g. 0.001 BTC
 }
 
 function parseNumber(value: string | undefined, fallback: number): number {
@@ -30,6 +32,8 @@ export const tradingConfig: TradingConfig = {
   maxLogEntries: parseNumber(process.env.MAX_LOG_ENTRIES, 200),
   klineInterval: process.env.KLINE_INTERVAL ?? "1m",
   maxCloseSlippagePct: parseNumber(process.env.MAX_CLOSE_SLIPPAGE_PCT, 0.05),
+  priceTick: parseNumber(process.env.PRICE_TICK, 0.1),
+  qtyStep: parseNumber(process.env.QTY_STEP, 0.001),
 };
 
 export interface MakerConfig {
@@ -42,6 +46,7 @@ export interface MakerConfig {
   refreshIntervalMs: number;
   maxLogEntries: number;
   maxCloseSlippagePct: number;
+  priceTick: number;
 }
 
 export const makerConfig: MakerConfig = {
@@ -57,4 +62,5 @@ export const makerConfig: MakerConfig = {
     process.env.MAKER_MAX_CLOSE_SLIPPAGE_PCT ?? process.env.MAX_CLOSE_SLIPPAGE_PCT,
     0.05
   ),
+  priceTick: parseNumber(process.env.MAKER_PRICE_TICK ?? process.env.PRICE_TICK, 0.1),
 };

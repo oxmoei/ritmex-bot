@@ -1,6 +1,6 @@
 import type { ExchangeAdapter } from "../exchanges/adapter";
 import type { AsterOrder, CreateOrderParams } from "../exchanges/types";
-import { toPrice1Decimal, toQty3Decimal } from "../utils/math";
+import { roundDownToTick, roundQtyDownToStep } from "../utils/math";
 import { isUnknownOrderError } from "../utils/errors";
 import { isOrderPriceAllowedByMark } from "../utils/strategy";
 
@@ -126,17 +126,20 @@ export async function placeOrder(
   amount: number,
   log: LogHandler,
   reduceOnly = false,
-  guard?: OrderGuardOptions
+  guard?: OrderGuardOptions,
+  opts?: { priceTick: number; qtyStep: number }
 ): Promise<AsterOrder | undefined> {
   const type = "LIMIT";
   if (isOperating(locks, type)) return;
   if (!enforceMarkPriceGuard(side, price, guard, log, "限价单")) return;
+  const priceTick = opts?.priceTick ?? 0.1;
+  const qtyStep = opts?.qtyStep ?? 0.001;
   const params: CreateOrderParams = {
     symbol,
     side,
     type,
-    quantity: toQty3Decimal(amount),
-    price: toPrice1Decimal(price),
+    quantity: roundQtyDownToStep(amount, qtyStep),
+    price: roundDownToTick(price, priceTick),
     timeInForce: "GTX",
   };
   if (reduceOnly) params.reduceOnly = "true";
@@ -168,16 +171,18 @@ export async function placeMarketOrder(
   amount: number,
   log: LogHandler,
   reduceOnly = false,
-  guard?: OrderGuardOptions
+  guard?: OrderGuardOptions,
+  opts?: { qtyStep: number }
 ): Promise<AsterOrder | undefined> {
   const type = "MARKET";
   if (isOperating(locks, type)) return;
   if (!enforceMarkPriceGuard(side, guard?.expectedPrice ?? null, guard, log, "市价单")) return;
+  const qtyStep = opts?.qtyStep ?? 0.001;
   const params: CreateOrderParams = {
     symbol,
     side,
     type,
-    quantity: toQty3Decimal(amount),
+    quantity: roundQtyDownToStep(amount, qtyStep),
   };
   if (reduceOnly) params.reduceOnly = "true";
   await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, type, side, log);
@@ -209,7 +214,8 @@ export async function placeStopLossOrder(
   quantity: number,
   lastPrice: number | null,
   log: LogHandler,
-  guard?: OrderGuardOptions
+  guard?: OrderGuardOptions,
+  opts?: { priceTick: number; qtyStep: number }
 ): Promise<AsterOrder | undefined> {
   const type = "STOP_MARKET";
   if (isOperating(locks, type)) return;
@@ -224,14 +230,16 @@ export async function placeStopLossOrder(
       return;
     }
   }
+  const priceTick = opts?.priceTick ?? 0.1;
+  const qtyStep = opts?.qtyStep ?? 0.001;
   const params: CreateOrderParams = {
     symbol,
     side,
     type,
-    stopPrice: toPrice1Decimal(stopPrice),
+    stopPrice: roundDownToTick(stopPrice, priceTick),
     closePosition: "true",
     timeInForce: "GTC",
-    quantity: toQty3Decimal(quantity),
+    quantity: roundQtyDownToStep(quantity, qtyStep),
   };
   await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, type, side, log);
   lockOperating(locks, timers, pendings, type, log);
@@ -262,18 +270,21 @@ export async function placeTrailingStopOrder(
   quantity: number,
   callbackRate: number,
   log: LogHandler,
-  guard?: OrderGuardOptions
+  guard?: OrderGuardOptions,
+  opts?: { priceTick: number; qtyStep: number }
 ): Promise<AsterOrder | undefined> {
   const type = "TRAILING_STOP_MARKET";
   if (isOperating(locks, type)) return;
   if (!enforceMarkPriceGuard(side, activationPrice, guard, log, "动态止盈单")) return;
+  const priceTick = opts?.priceTick ?? 0.1;
+  const qtyStep = opts?.qtyStep ?? 0.001;
   const params: CreateOrderParams = {
     symbol,
     side,
     type,
-    quantity: toQty3Decimal(quantity),
+    quantity: roundQtyDownToStep(quantity, qtyStep),
     reduceOnly: "true",
-    activationPrice: toPrice1Decimal(activationPrice),
+    activationPrice: roundDownToTick(activationPrice, priceTick),
     callbackRate,
     timeInForce: "GTC",
   };
@@ -307,16 +318,18 @@ export async function marketClose(
   side: "BUY" | "SELL",
   quantity: number,
   log: LogHandler,
-  guard?: OrderGuardOptions
+  guard?: OrderGuardOptions,
+  opts?: { qtyStep: number }
 ): Promise<void> {
   const type = "MARKET";
   if (isOperating(locks, type)) return;
   if (!enforceMarkPriceGuard(side, guard?.expectedPrice ?? null, guard, log, "市价平仓")) return;
+  const qtyStep = opts?.qtyStep ?? 0.001;
   const params: CreateOrderParams = {
     symbol,
     side,
     type,
-    quantity: toQty3Decimal(quantity),
+    quantity: roundQtyDownToStep(quantity, qtyStep),
     reduceOnly: "true",
   };
   await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, type, side, log);

@@ -25,7 +25,7 @@ import {
 } from "./order-coordinator";
 import type { OrderLockMap, OrderPendingMap, OrderTimerMap } from "./order-coordinator";
 import { isUnknownOrderError } from "../utils/errors";
-import { toPrice1Decimal } from "../utils/math";
+import { roundDownToTick } from "../utils/math";
 import { createTradeLog, type TradeLogEntry } from "../state/trade-log";
 
 export interface TrendEngineSnapshot {
@@ -335,7 +335,8 @@ export class TrendEngine {
           markPrice: getPosition(this.accountSnapshot, this.config.symbol).markPrice,
           expectedPrice: Number(this.tickerSnapshot?.lastPrice) || null,
           maxPct: this.config.maxCloseSlippagePct,
-        }
+        },
+        { qtyStep: this.config.qtyStep }
       );
       this.tradeLog.push("open", `${reason}: ${side} @ ${price}`);
       this.lastOpenPlan = { side, price };
@@ -387,32 +388,45 @@ export class TrendEngine {
     );
 
     const profitLockStopPrice = direction === "long"
-      ? toPrice1Decimal(
-          position.entryPrice + this.config.profitLockOffsetUsd / Math.abs(position.positionAmt)
+      ? roundDownToTick(
+          position.entryPrice + this.config.profitLockOffsetUsd / Math.abs(position.positionAmt),
+          this.config.priceTick
         )
-      : toPrice1Decimal(
-          position.entryPrice - this.config.profitLockOffsetUsd / Math.abs(position.positionAmt)
+      : roundDownToTick(
+          position.entryPrice - this.config.profitLockOffsetUsd / Math.abs(position.positionAmt),
+          this.config.priceTick
         );
 
     if (pnl > this.config.profitLockTriggerUsd || position.unrealizedProfit > this.config.profitLockTriggerUsd) {
-      if (!currentStop) {
-        await this.tryPlaceStopLoss(stopSide, profitLockStopPrice, price);
-      } else {
-        const existingPrice = Number(currentStop.stopPrice);
-        if (Math.abs(existingPrice - profitLockStopPrice) > 0.01) {
-          await this.tryReplaceStop(stopSide, currentStop, profitLockStopPrice, price);
+      const tick = Math.max(1e-9, this.config.priceTick);
+      const profitLockValid =
+        (stopSide === "SELL" && profitLockStopPrice <= price - tick) ||
+        (stopSide === "BUY" && profitLockStopPrice >= price + tick);
+      if (profitLockValid) {
+        if (!currentStop) {
+          await this.tryPlaceStopLoss(stopSide, profitLockStopPrice, price);
+        } else {
+          const existingRaw = Number(currentStop.stopPrice);
+          const existingPrice = Number.isFinite(existingRaw) ? existingRaw : NaN;
+          const improves =
+            !Number.isFinite(existingPrice) ||
+            (stopSide === "SELL" && profitLockStopPrice >= existingPrice + tick) ||
+            (stopSide === "BUY" && profitLockStopPrice <= existingPrice - tick);
+          if (improves) {
+            await this.tryReplaceStop(stopSide, currentStop, profitLockStopPrice, price);
+          }
         }
       }
     }
 
     if (!currentStop) {
-      await this.tryPlaceStopLoss(stopSide, toPrice1Decimal(stopPrice), price);
+      await this.tryPlaceStopLoss(stopSide, roundDownToTick(stopPrice, this.config.priceTick), price);
     }
 
     if (!currentTrailing) {
       await this.tryPlaceTrailingStop(
         stopSide,
-        toPrice1Decimal(activationPrice),
+        roundDownToTick(activationPrice, this.config.priceTick),
         Math.abs(position.positionAmt)
       );
     }
@@ -479,7 +493,8 @@ export class TrendEngine {
                 : this.depthSnapshot?.asks?.[0]?.[0]
             ) || null,
             maxPct: this.config.maxCloseSlippagePct,
-          }
+        },
+        { qtyStep: this.config.qtyStep }
         );
         this.tradeLog.push("close", `止损平仓: ${direction === "long" ? "SELL" : "BUY"}`);
       } catch (err) {
@@ -518,7 +533,8 @@ export class TrendEngine {
         {
           markPrice: position.markPrice,
           maxPct: this.config.maxCloseSlippagePct,
-        }
+        },
+        { priceTick: this.config.priceTick, qtyStep: this.config.qtyStep }
       );
     } catch (err) {
       this.tradeLog.push("error", `挂止损单失败: ${String(err)}`);
@@ -531,6 +547,15 @@ export class TrendEngine {
     nextStopPrice: number,
     lastPrice: number
   ): Promise<void> {
+    // 预校验：SELL 止损价必须低于当前价；BUY 止损价必须高于当前价
+    const invalidForSide =
+      (side === "SELL" && nextStopPrice >= lastPrice) ||
+      (side === "BUY" && nextStopPrice <= lastPrice);
+    if (invalidForSide) {
+      // 目标止损价与当前价冲突时跳过移动，避免反复撤单/重下导致的循环
+      return;
+    }
+    const existingStopPrice = Number(currentOrder.stopPrice);
     try {
       await this.exchange.cancelOrder({ symbol: this.config.symbol, orderId: currentOrder.orderId });
     } catch (err) {
@@ -542,8 +567,67 @@ export class TrendEngine {
         this.tradeLog.push("error", `取消原止损单失败: ${String(err)}`);
       }
     }
-    await this.tryPlaceStopLoss(side, nextStopPrice, lastPrice);
-    this.tradeLog.push("stop", `移动止损到 ${nextStopPrice}`);
+    // 仅在成功创建新止损单后记录“移动止损”日志
+    try {
+      const position = getPosition(this.accountSnapshot, this.config.symbol);
+      const quantity = Math.abs(position.positionAmt) || this.config.tradeAmount;
+      const order = await placeStopLossOrder(
+        this.exchange,
+        this.config.symbol,
+        this.openOrders,
+        this.locks,
+        this.timers,
+        this.pending,
+        side,
+        nextStopPrice,
+        quantity,
+        lastPrice,
+        (type, detail) => this.tradeLog.push(type, detail),
+        {
+          markPrice: position.markPrice,
+          maxPct: this.config.maxCloseSlippagePct,
+        },
+        { priceTick: this.config.priceTick, qtyStep: this.config.qtyStep }
+      );
+      if (order) {
+        this.tradeLog.push("stop", `移动止损到 ${roundDownToTick(nextStopPrice, this.config.priceTick)}`);
+      }
+    } catch (err) {
+      this.tradeLog.push("error", `移动止损失败: ${String(err)}`);
+      // 回滚策略：尝试用原价恢复止损，以避免出现短时间内无止损保护
+      try {
+        const position = getPosition(this.accountSnapshot, this.config.symbol);
+        const quantity = Math.abs(position.positionAmt) || this.config.tradeAmount;
+        const restoreInvalid =
+          (side === "SELL" && existingStopPrice >= lastPrice) ||
+          (side === "BUY" && existingStopPrice <= lastPrice);
+        if (!restoreInvalid) {
+          const restored = await placeStopLossOrder(
+            this.exchange,
+            this.config.symbol,
+            this.openOrders,
+            this.locks,
+            this.timers,
+            this.pending,
+            side,
+            existingStopPrice,
+            quantity,
+            lastPrice,
+            (t, d) => this.tradeLog.push(t, d),
+            {
+              markPrice: position.markPrice,
+              maxPct: this.config.maxCloseSlippagePct,
+            },
+            { priceTick: this.config.priceTick, qtyStep: this.config.qtyStep }
+          );
+          if (restored) {
+            this.tradeLog.push("order", `恢复原止损 @ ${roundDownToTick(existingStopPrice, this.config.priceTick)}`);
+          }
+        }
+      } catch (recoverErr) {
+        this.tradeLog.push("error", `恢复原止损失败: ${String(recoverErr)}`);
+      }
+    }
   }
 
   private async tryPlaceTrailingStop(
@@ -567,7 +651,8 @@ export class TrendEngine {
         {
           markPrice: getPosition(this.accountSnapshot, this.config.symbol).markPrice,
           maxPct: this.config.maxCloseSlippagePct,
-        }
+        },
+        { priceTick: this.config.priceTick, qtyStep: this.config.qtyStep }
       );
     } catch (err) {
       this.tradeLog.push("error", `挂动态止盈失败: ${String(err)}`);

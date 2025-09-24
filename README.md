@@ -53,7 +53,9 @@
    - `TRADE_SYMBOL`：策略运行的交易对（默认 `BTCUSDT`），需与 API 权限范围一致。
    - `TRADE_AMOUNT`：单次下单数量（合约张数折算后单位为标的货币，例如 BTC）。
    - `LOSS_LIMIT`：单笔允许的最大亏损（USDT），触发即强制平仓。
-   - `TRAILING_PROFIT` / `TRAILING_CALLBACK_RATE`：趋势策略的动态止盈触发值与回撤百分比。
+   - `TRAILING_PROFIT` / `TRAILING_CALLBACK_RATE`：趋势策略的动态止盈触发值（单位 USDT）与回撤百分比（百分数，如 0.2 表示 0.2%）。
+   - `PROFIT_LOCK_TRIGGER_USD` / `PROFIT_LOCK_OFFSET_USD`：达到一定浮盈后，将基础止损上调（做多）或下调（做空）到开仓价的偏移量（单位 USDT）。
+   - `PRICE_TICK` / `QTY_STEP`：交易对的最小价格变动单位与最小下单数量步长（例如 BTCUSDT 分别为 0.1 与 0.001）。
    - `MAKER_*` 参数：做市策略追价阈值、报价偏移、刷新频率等，可按流动性需求调节。
 6. **运行机器人**
    ```bash
@@ -89,8 +91,24 @@ ASTER_API_SECRET=your_secret
 TRADE_SYMBOL=BTCUSDT        # optional, defaults to BTCUSDT
 TRADE_AMOUNT=0.001          # position size used by both strategies
 LOSS_LIMIT=0.03             # per-trade USD loss cap
+TRAILING_PROFIT=0.2         # trailing activation profit in USDT
+TRAILING_CALLBACK_RATE=0.2  # trailing callback in percent, e.g. 0.2 => 0.2%
+PROFIT_LOCK_TRIGGER_USD=0.1 # profit threshold to start moving base stop (USDT)
+PROFIT_LOCK_OFFSET_USD=0.05 # base stop offset from entry after trigger (USDT)
+PRICE_TICK=0.1              # price tick size; set per symbol
+QTY_STEP=0.001              # quantity step size; set per symbol
 ```
-Additional maker-specific knobs (`MAKER_*`) live in `src/config.ts` and may be overridden via env vars.
+Additional maker-specific knobs (`MAKER_*`) live in `src/config.ts` and may be overridden via env vars:
+```bash
+# Maker-specific (units in USDT unless noted)
+MAKER_LOSS_LIMIT=0.03             # override maker risk stop; defaults to LOSS_LIMIT
+MAKER_PRICE_CHASE=0.3             # chase threshold
+MAKER_BID_OFFSET=0                # bid offset from top bid (USDT)
+MAKER_ASK_OFFSET=0                # ask offset from top ask (USDT)
+MAKER_REFRESH_INTERVAL_MS=1500    # maker refresh cadence (ms)
+MAKER_MAX_CLOSE_SLIPPAGE_PCT=0.05 # allowed deviation vs mark when closing
+MAKER_PRICE_TICK=0.1              # maker tick size; defaults to PRICE_TICK
+```
 
 ## Running the CLI
 ```bash

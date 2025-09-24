@@ -1,9 +1,20 @@
-export function toPrice1Decimal(price: number): number {
-  return Math.floor(price * 10) / 10;
+export function roundDownToTick(value: number, tick: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(tick) || tick <= 0) return value;
+  const scaled = Math.floor(value / tick) * tick;
+  // Avoid floating residuals
+  return Number(scaled.toFixed(Math.max(0, decimalsOf(tick))));
 }
 
-export function toQty3Decimal(qty: number): number {
-  return Math.floor(qty * 1000) / 1000;
+export function roundQtyDownToStep(value: number, step: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(step) || step <= 0) return value;
+  const scaled = Math.floor(value / step) * step;
+  return Number(scaled.toFixed(Math.max(0, decimalsOf(step))));
+}
+
+export function decimalsOf(step: number): number {
+  const s = step.toString();
+  if (!s.includes(".")) return 0;
+  return s.split(".")[1].length;
 }
 
 export function isNearlyZero(value: number, epsilon = 1e-5): boolean {

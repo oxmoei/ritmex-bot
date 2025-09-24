@@ -6,7 +6,7 @@ import type {
   AsterOrder,
   AsterTicker,
 } from "../exchanges/types";
-import { toPrice1Decimal } from "../utils/math";
+import { roundDownToTick } from "../utils/math";
 import { createTradeLog, type TradeLogEntry } from "../state/trade-log";
 import { isUnknownOrderError } from "../utils/errors";
 import { getPosition, type PositionSnapshot } from "../utils/strategy";
@@ -232,8 +232,8 @@ export class MakerEngine {
         return;
       }
 
-      const bidPrice = toPrice1Decimal(topBid - this.config.bidOffset);
-      const askPrice = toPrice1Decimal(topAsk + this.config.askOffset);
+      const bidPrice = roundDownToTick(topBid - this.config.bidOffset, this.config.priceTick);
+      const askPrice = roundDownToTick(topAsk + this.config.askOffset, this.config.priceTick);
       const position = getPosition(this.accountSnapshot, this.config.symbol);
       const absPosition = Math.abs(position.positionAmt);
       const desired: DesiredOrder[] = [];
