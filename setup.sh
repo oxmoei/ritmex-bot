@@ -152,7 +152,7 @@ EOF
 start_bot() {
   # Bun auto-loads .env; no need to run dotenv explicitly
   # Ensure Bun has a TTY for interactive menu input
-  exec bun index.ts < /dev/tty > /dev/tty 2>&1
+  exec bun index.ts < /dev/tty
 }
 
 main "$@"
