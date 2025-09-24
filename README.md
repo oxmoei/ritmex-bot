@@ -6,9 +6,9 @@
 
 使用优惠码获取 30% 手续费折扣：[注册 Aster 获取手续费优惠](https://www.asterdex.com/zh-CN/referral/4665f3)
 
-如果你完全不懂代码，可以查看 >> [小白教程](simple-readme.md) 了解使用方法。<<
+如果你完全不懂代码，可以查看 **[小白教程](simple-readme.md) 了解使用方法。**
 
-遇到Bug，返回问题，请到 [Telegram群组](https://t.me/+4fdo0quY87o4Mjhh)
+遇到Bug，反馈问题，请到 [Telegram群组](https://t.me/+4fdo0quY87o4Mjhh)
 
 ### 一键脚本
 
