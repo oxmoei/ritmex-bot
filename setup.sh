@@ -109,8 +109,7 @@ prompt_env() {
     echo "ASTER_API_KEY cannot be empty. Please try again."
   done
   while true; do
-    read -r -s -p "ASTER_API_SECRET (input hidden): " ASTER_API_SECRET < /dev/tty
-    echo
+    read -r -p "ASTER_API_SECRET: " ASTER_API_SECRET < /dev/tty
     [ -n "${ASTER_API_SECRET:-}" ] && break
     echo "ASTER_API_SECRET cannot be empty. Please try again."
   done
@@ -152,7 +151,8 @@ EOF
 
 start_bot() {
   # Bun auto-loads .env; no need to run dotenv explicitly
-  bun run start
+  # Ensure Bun has a TTY for interactive menu input
+  exec bun run start < /dev/tty
 }
 
 main "$@"
