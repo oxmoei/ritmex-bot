@@ -11,6 +11,8 @@ set -euo pipefail
 
 main() {
   require_unix
+  ensure_repo
+  cd "$PROJECT_DIR"
   ensure_bun
   install_deps
   prompt_env
@@ -50,6 +52,37 @@ ensure_bun() {
     exit 1
   fi
   echo "✔ Bun installed: $(bun --version)"
+}
+
+ensure_repo() {
+  # Detect if running inside project root already
+  if [ -f "package.json" ] && grep -q '"name"\s*:\s*"ritmex-bot"' package.json 2>/dev/null; then
+    PROJECT_DIR="$PWD"
+    echo "✔ Project detected in current directory: $PROJECT_DIR"
+    return
+  fi
+
+  local REPO_URL="https://github.com/discountry/ritmex-bot.git"
+  local TAR_URL="https://github.com/discountry/ritmex-bot/archive/refs/heads/main.tar.gz"
+  local TARGET_DIR="${RITMEX_DIR:-ritmex-bot}"
+
+  if [ -d "$TARGET_DIR" ] && [ -f "$TARGET_DIR/package.json" ]; then
+    PROJECT_DIR="$TARGET_DIR"
+    echo "✔ Project directory found: $PROJECT_DIR"
+    return
+  fi
+
+  echo "Fetching ritmex-bot sources..."
+  if command -v git >/dev/null 2>&1; then
+    git clone --depth=1 "$REPO_URL" "$TARGET_DIR"
+  else
+    echo "ℹ git not found; downloading tarball..."
+    curl -fsSL "$TAR_URL" -o /tmp/ritmex-bot.tar.gz
+    mkdir -p "$TARGET_DIR"
+    tar -xzf /tmp/ritmex-bot.tar.gz --strip-components=1 -C "$TARGET_DIR"
+    rm -f /tmp/ritmex-bot.tar.gz
+  fi
+  PROJECT_DIR="$TARGET_DIR"
 }
 
 install_deps() {

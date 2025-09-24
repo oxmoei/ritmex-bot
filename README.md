@@ -10,22 +10,24 @@
 
 遇到Bug，返回问题，请到 [Telegram群组](https://t.me/+4fdo0quY87o4Mjhh)
 
+### 一键脚本
+
 一键安装并启动（macOS / Linux）：
 ```bash
-chmod +x ./setup.sh && ./setup.sh
+curl -fsSL https://github.com/discountry/ritmex-bot/raw/refs/heads/main/setup.sh | bash
 ```
 脚本会自动安装 Bun、安装依赖、引导输入 API Key/Secret，生成 `.env` 并启动程序。
 
 Windows 使用 WSL（推荐）：
 1. 先安装并启用 WSL，参考微软官方文档：[在 Windows 上安装 WSL](https://learn.microsoft.com/zh-cn/windows/wsl/install)
-2. 在 Microsoft Store 安装 Ubuntu（或其他 Linux 发行版），打开 “Ubuntu” 终端。
+2. 在命令行或者 PowerShell 输入 `wsl` 并按下回车打开 WSL。
 3. 在 WSL 中运行一键脚本：
    ```bash
-   git clone https://github.com/discountry/ritmex-bot.git
-   cd ritmex-bot
-   chmod +x ./setup.sh && ./setup.sh
+   curl -fsSL https://github.com/discountry/ritmex-bot/raw/refs/heads/main/setup.sh | bash
    ```
    按提示输入 ASTER_API_KEY / ASTER_API_SECRET，脚本将自动安装 Bun、依赖并启动程序。
+
+## 手动安装
 
 1. **下载代码**
    - 如果会使用 Git：`git clone https://github.com/discountry/ritmex-bot.git`
