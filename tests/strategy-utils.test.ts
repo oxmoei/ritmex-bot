@@ -34,17 +34,17 @@ const mockKlines = (values: number[]): AsterKline[] =>
 
 describe("strategy utils", () => {
   it("returns default position when snapshot missing", () => {
-    expect(getPosition(null, "BTCUSDT")).toEqual({ positionAmt: 0, entryPrice: 0, unrealizedProfit: 0 });
+    expect(getPosition(null, "BTCUSDT")).toEqual({ positionAmt: 0, entryPrice: 0, unrealizedProfit: 0, markPrice: null });
   });
 
   it("extracts position for symbol", () => {
     const snapshot = mockSnapshot([{ symbol: "BTCUSDT", amt: 1, entry: 100, pnl: 5 }]);
-    expect(getPosition(snapshot, "BTCUSDT")).toEqual({ positionAmt: 1, entryPrice: 100, unrealizedProfit: 5 });
+    expect(getPosition(snapshot, "BTCUSDT")).toEqual({ positionAmt: 1, entryPrice: 100, unrealizedProfit: 5, markPrice: null });
   });
 
   it("returns zero position when symbol not found", () => {
     const snapshot = mockSnapshot([{ symbol: "ETHUSDT", amt: 2, entry: 200, pnl: 10 }]);
-    expect(getPosition(snapshot, "BTCUSDT")).toEqual({ positionAmt: 0, entryPrice: 0, unrealizedProfit: 0 });
+    expect(getPosition(snapshot, "BTCUSDT")).toEqual({ positionAmt: 0, entryPrice: 0, unrealizedProfit: 0, markPrice: null });
   });
 
   it("returns null when not enough klines", () => {
