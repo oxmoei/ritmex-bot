@@ -11,6 +11,8 @@ import type {
   PositionSide,
 } from "../types";
 
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
 const REST_BASE = "https://fapi.asterdex.com";
 const WS_PUBLIC_URL = "wss://fstream.asterdex.com/ws";
 const WS_LISTEN_KEY_URL = "wss://fstream.asterdex.com/ws/";
