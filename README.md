@@ -11,11 +11,10 @@
 遇到Bug，反馈问题，请到 [Telegram群组](https://t.me/+4fdo0quY87o4Mjhh)
 
 ## 🖥️ **支持平台**
-- ![WSL](https://img.shields.io/badge/-Windows-0078D6?logo=windows&logoColor=white)
 - ![macOS](https://img.shields.io/badge/-macOS-000000?logo=apple&logoColor=white)
 - ![Linux](https://img.shields.io/badge/-Linux-FCC624?logo=linux&logoColor=black)
 
-## 🤖 安装/运行
+## 🤖 安装/运行（macOS/Linux/WSL）
 ### -确保你已安装 `git`，如果未安装请参考➡️[安装git教程](./安装git教程.md)）
 1. **克隆仓库并进入项目目录**
      ```bash
