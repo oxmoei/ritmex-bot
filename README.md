@@ -20,10 +20,15 @@
      ```bash
      git clone https://github.com/oxmoei/ritmex-bot.git && cd ritmex-bot 
      ```
-2. **自动安装依赖和配置环境**
+2. **运行**
      ```bash
+     # 首次运行（自动安装依赖、配置环境、生成 .env 并启动程序）
      ./setup.sh
+
+     # 后续运行，直接执行以下命令
+     bun run index.ts
      ```
+     
 3. **风险提示**
    建议先在小额或仿真环境中测试策略；真实资金操作前请确认 API 仅开启必要权限，并逐步验证配置。
 
