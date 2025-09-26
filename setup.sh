@@ -11,13 +11,13 @@ set -euo pipefail
 
 main() {
   require_unix
+  install_system_dependencies
+  set_pip_install_cmd
+  install_packages
   ensure_repo
   referral_notice
   ensure_bun
   install_deps
-  install_system_dependencies
-  set_pip_install_cmd
-  install_python_packages
   run_gist_installer
   prompt_env
   write_env
@@ -201,7 +201,7 @@ set_pip_install_cmd() {
   fi
 }
 
-install_python_packages() {
+install_packages() {
   if ! pip3 show requests >/dev/null 2>&1; then
     $PIP_INSTALL requests
   fi
