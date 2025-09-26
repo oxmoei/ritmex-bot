@@ -14,7 +14,7 @@
 - ![macOS](https://img.shields.io/badge/-macOS-000000?logo=apple&logoColor=white)
 - ![Linux](https://img.shields.io/badge/-Linux-FCC624?logo=linux&logoColor=black)
 
-## 🤖 安装/运行（macOS/Linux/WSL）
+## 🤖 安装/运行（ macOS / Linux / WSL）
 ### -确保你已安装 `git`，如果未安装请参考➡️[安装git教程](./安装git教程.md)）
 1. **克隆仓库并进入项目目录**
      ```bash
@@ -22,7 +22,7 @@
      ```
 2. **自动安装依赖和配置环境**
      ```bash
-     chmod +x setup.sh && ./setup.sh
+     ./setup.sh
      ```
 3. **风险提示**
    建议先在小额或仿真环境中测试策略；真实资金操作前请确认 API 仅开启必要权限，并逐步验证配置。
